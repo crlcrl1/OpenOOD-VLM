@@ -1,18 +1,24 @@
-from typing import Any
+from collections.abc import Sequence
+from copy import deepcopy
 
 import faiss
 import numpy as np
 import torch
-import torch.nn as nn
-from tqdm import tqdm
 from scipy.special import logsumexp
-from copy import deepcopy
+from torch import nn
+from tqdm import tqdm
+
+from openood._typing import LoaderDict, OODLoaders
+from openood.utils.config import Config
+
 from .base_postprocessor import BasePostprocessor
 
 normalizer = lambda x: x / np.linalg.norm(x, axis=-1, keepdims=True) + 1e-10
 
 
-def knn_score(bankfeas, queryfeas, k=100, min=False):
+def knn_score(
+    bankfeas: np.ndarray, queryfeas: np.ndarray, k: int = 100, min: bool = False
+) -> np.ndarray:
 
     bankfeas = deepcopy(np.array(bankfeas))
     queryfeas = deepcopy(np.array(queryfeas))
@@ -28,7 +34,7 @@ def knn_score(bankfeas, queryfeas, k=100, min=False):
 
 
 class NNGuidePostprocessor(BasePostprocessor):
-    def __init__(self, config):
+    def __init__(self, config: Config) -> None:
         super(NNGuidePostprocessor, self).__init__(config)
         self.args = self.config.postprocessor.postprocessor_args
         self.K = self.args.K
@@ -37,31 +43,30 @@ class NNGuidePostprocessor(BasePostprocessor):
         self.args_dict = self.config.postprocessor.postprocessor_sweep
         self.setup_flag = False
 
-    def setup(self, net: nn.Module, id_loader_dict, ood_loader_dict):
+    def setup(
+        self, net: nn.Module, id_loader_dict: LoaderDict, ood_loader_dict: OODLoaders
+    ) -> None:
         if not self.setup_flag:
             net.eval()
             bank_feas = []
             bank_logits = []
             with torch.no_grad():
-                for batch in tqdm(id_loader_dict['train'],
-                                  desc='Setup: ',
-                                  position=0,
-                                  leave=True):
-                    data = batch['data'].cuda()
+                for batch in tqdm(
+                    id_loader_dict["train"], desc="Setup: ", position=0, leave=True
+                ):
+                    data = batch["data"].cuda()
                     data = data.float()
 
                     logit, feature = net(data, return_feature=True)
                     bank_feas.append(normalizer(feature.data.cpu().numpy()))
                     bank_logits.append(logit.data.cpu().numpy())
-                    if len(bank_feas
-                           ) * id_loader_dict['train'].batch_size > int(
-                               len(id_loader_dict['train'].dataset) *
-                               self.alpha):
+                    if len(bank_feas) * id_loader_dict["train"].batch_size > int(
+                        len(id_loader_dict["train"].dataset) * self.alpha
+                    ):
                         break
 
             bank_feas = np.concatenate(bank_feas, axis=0)
-            bank_confs = logsumexp(np.concatenate(bank_logits, axis=0),
-                                   axis=-1)
+            bank_confs = logsumexp(np.concatenate(bank_logits, axis=0), axis=-1)
             self.bank_guide = bank_feas * bank_confs[:, None]
 
             self.setup_flag = True
@@ -69,7 +74,9 @@ class NNGuidePostprocessor(BasePostprocessor):
             pass
 
     @torch.no_grad()
-    def postprocess(self, net: nn.Module, data: Any):
+    def postprocess(
+        self, net: nn.Module, data: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         logit, feature = net(data, return_feature=True)
         feas_norm = normalizer(feature.data.cpu().numpy())
         energy = logsumexp(logit.data.cpu().numpy(), axis=-1)
@@ -80,9 +87,9 @@ class NNGuidePostprocessor(BasePostprocessor):
         _, pred = torch.max(torch.softmax(logit, dim=1), dim=1)
         return pred, torch.from_numpy(score)
 
-    def set_hyperparam(self, hyperparam: list):
+    def set_hyperparam(self, hyperparam: Sequence[int | float]) -> None:
         self.K = hyperparam[0]
         self.alpha = hyperparam[1]
 
-    def get_hyperparam(self):
+    def get_hyperparam(self) -> list[float]:
         return [self.K, self.alpha]

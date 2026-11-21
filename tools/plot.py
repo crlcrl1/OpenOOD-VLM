@@ -1,15 +1,11 @@
-import torch
-import ipdb
 import matplotlib.pyplot as plt
-from matplotlib.ticker import ScalarFormatter
-import numpy as np
 
-color_dict = {
-    'dark_blue': '#403990',
-    'light_blue': '#80A6E2',
-    'yellow': '#FBDD85',
-    'light_red': '#F46F43',
-    'dark_red': '#CF3D3E'
+color_dict: dict[str, str] = {
+    "dark_blue": "#403990",
+    "light_blue": "#80A6E2",
+    "yellow": "#FBDD85",
+    "light_red": "#F46F43",
+    "dark_red": "#CF3D3E",
 }
 
 # ########### number of negative labels
@@ -39,9 +35,7 @@ color_dict = {
 # plt.savefig("negnum.pdf", dpi=300, bbox_inches="tight")  # 保存图像
 
 
-
-
-# # different label selection strategy. 
+# # different label selection strategy.
 # methods = ["neglabel", "pos_only", "neg_only", "neg_pos"]
 # near = [70.9, 75.2, 56.39, 55.75]
 # far = [28.0, 29.52, 18.92, 17.6]
@@ -90,8 +84,6 @@ color_dict = {
 # # 调整布局并保存图像
 # plt.tight_layout()
 # plt.savefig("similarity_metric.pdf", dpi=300, bbox_inches="tight")
-
-
 
 
 # # circular enhancement
@@ -148,7 +140,6 @@ color_dict = {
 # plt.savefig("alpha_dis_batch_tradeoff.pdf", dpi=300, bbox_inches="tight")
 
 
-
 # # value of gamma
 # alpha = [0.1, 0.3, 0.4, 0.5, 0.6, 0.7, 0.9, 0.95]
 # fpr95_near = [68.18, 62.48, 61.10, 60.28, 60.53, 59.86, 57.38, 58.42]
@@ -181,20 +172,39 @@ color_dict = {
 # plt.savefig("gamma_value.pdf", dpi=300, bbox_inches="tight")
 
 
-
 # error rate in first batch
-error_rate =    [0,     0.1,    0.2,   0.3,    0.4,  0.5,   0.6,   0.7,   0.8,   0.9,   1.0]
-fpr95_ssbhard = [58.43, 60.11, 62.11, 63.02, 64.12, 65.83, 69.23, 72.64, 75.04, 76.45, 78.85]
+error_rate = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+fpr95_ssbhard: list[float] = [
+    58.43,
+    60.11,
+    62.11,
+    63.02,
+    64.12,
+    65.83,
+    69.23,
+    72.64,
+    75.04,
+    76.45,
+    78.85,
+]
 
 # 创建画布
-fig, ax1 = plt.subplots(figsize=(3.2, 2.8 ))
+fig, ax1 = plt.subplots(figsize=(3.2, 2.8))
 # 绘制 Near OOD 曲线
-ax1.plot(error_rate, fpr95_ssbhard, marker='o', label='Ours', color=color_dict['dark_red'])
-ax1.set_xlabel('Error Rate in First Batch', fontsize=12)
-ax1.set_ylabel('FPR95', fontsize=12, color=color_dict['dark_red'])
-ax1.tick_params(axis='y', labelcolor=color_dict['dark_red'])
+ax1.plot(
+    error_rate, fpr95_ssbhard, marker="o", label="Ours", color=color_dict["dark_red"]
+)
+ax1.set_xlabel("Error Rate in First Batch", fontsize=12)
+ax1.set_ylabel("FPR95", fontsize=12, color=color_dict["dark_red"])
+ax1.tick_params(axis="y", labelcolor=color_dict["dark_red"])
 # Add horizontal dashed line for Near OOD baseline
-ax1.axhline(y=74.83, color=color_dict['dark_blue'], linestyle='--', linewidth=3, label='NegLabel')
+ax1.axhline(
+    y=74.83,
+    color=color_dict["dark_blue"],
+    linestyle="--",
+    linewidth=3,
+    label="NegLabel",
+)
 # 图例
 fig.legend(loc="upper right", bbox_to_anchor=(0.68, 0.78), fontsize=12, ncol=1)
 # 美化图表
@@ -204,21 +214,31 @@ plt.tight_layout()
 plt.savefig("early_errors.pdf", dpi=300, bbox_inches="tight")
 
 
-
-
 # number of test samples
-number_of_test_samples =    [100,   500, 1000,  2000, 5000, 10000, 50000, 99000]
-fpr95_ssbhard =             [72.78, 71.5, 68.0, 66.39, 65.1, 63.9, 62.9,  62.5 ]
+number_of_test_samples: list[int] = [100, 500, 1000, 2000, 5000, 10000, 50000, 99000]
+fpr95_ssbhard: list[float] = [72.78, 71.5, 68.0, 66.39, 65.1, 63.9, 62.9, 62.5]
 
 # 创建画布
-fig, ax1 = plt.subplots(figsize=(3.2, 2.8 ))
+fig, ax1 = plt.subplots(figsize=(3.2, 2.8))
 # 绘制 Near OOD 曲线
-ax1.plot(number_of_test_samples, fpr95_ssbhard, marker='o', label='Ours', color=color_dict['dark_red'])
-ax1.set_xlabel('Number of Test Samples', fontsize=12)
-ax1.set_ylabel('FPR95', fontsize=12, color=color_dict['dark_red'])
-ax1.tick_params(axis='y', labelcolor=color_dict['dark_red'])
+ax1.plot(
+    number_of_test_samples,
+    fpr95_ssbhard,
+    marker="o",
+    label="Ours",
+    color=color_dict["dark_red"],
+)
+ax1.set_xlabel("Number of Test Samples", fontsize=12)
+ax1.set_ylabel("FPR95", fontsize=12, color=color_dict["dark_red"])
+ax1.tick_params(axis="y", labelcolor=color_dict["dark_red"])
 # Add horizontal dashed line for Near OOD baseline
-ax1.axhline(y=74.83, color=color_dict['dark_blue'], linestyle='--', linewidth=3, label='NegLabel')
+ax1.axhline(
+    y=74.83,
+    color=color_dict["dark_blue"],
+    linestyle="--",
+    linewidth=3,
+    label="NegLabel",
+)
 # 图例
 fig.legend(loc="upper right", bbox_to_anchor=(0.8, 0.78), fontsize=12, ncol=1)
 # 美化图表
@@ -251,7 +271,6 @@ plt.savefig("test_number.pdf", dpi=300, bbox_inches="tight")
 # plt.savefig("batch_size.pdf", dpi=300, bbox_inches="tight")
 
 
-
 # # corpus size
 # alpha = [2000, 5000, 10000, 20000, 50000, 100000, 200000]
 # fpr95_near = [63.15, 62.28, 62.01, 61.34, 60.85, 60.54, 60.36]
@@ -277,7 +296,6 @@ plt.savefig("test_number.pdf", dpi=300, bbox_inches="tight")
 # plt.tight_layout()
 # # 保存图表
 # plt.savefig("corpus_size.pdf", dpi=300, bbox_inches="tight")
-
 
 
 # # value of gap
@@ -307,7 +325,6 @@ plt.savefig("test_number.pdf", dpi=300, bbox_inches="tight")
 # plt.savefig("gap_value.pdf", dpi=300, bbox_inches="tight")
 
 
-
 # # analyses on the length of queue.
 # queue_len = [10, 30, 50, 100, 200, 300]
 # fpr95_near = [62.69, 61.70, 61.54, 60.82, 60.56, 60.55]
@@ -334,8 +351,6 @@ plt.savefig("test_number.pdf", dpi=300, bbox_inches="tight")
 # plt.tight_layout()
 # # 保存图表
 # plt.savefig("queue_length.pdf", dpi=300, bbox_inches="tight")
-
-
 
 
 # import matplotlib.pyplot as plt
@@ -399,8 +414,7 @@ plt.savefig("test_number.pdf", dpi=300, bbox_inches="tight")
 # # plt.show()
 
 
-
-# # ######### AANeg motivation, 
+# # ######### AANeg motivation,
 # # ood_score = torch.load('ood_activation_imagenet_places.pth', map_location=torch.device('cpu')) ## 10K
 # # id_score = torch.load('id_activation_imagenet_places.pth', map_location=torch.device('cpu')) ## 10K
 

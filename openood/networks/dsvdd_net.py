@@ -1,10 +1,10 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 
 class MNIST_LeNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         self.rep_dim = 32
@@ -16,7 +16,7 @@ class MNIST_LeNet(nn.Module):
         self.bn2 = nn.BatchNorm2d(4, eps=1e-04, affine=False)
         self.fc1 = nn.Linear(4 * 7 * 7, self.rep_dim, bias=False)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
         x = self.pool(F.leaky_relu(self.bn1(x)))
         x = self.conv2(x)
@@ -27,7 +27,7 @@ class MNIST_LeNet(nn.Module):
 
 
 class CIFAR10_LeNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         self.rep_dim = 128
@@ -41,7 +41,7 @@ class CIFAR10_LeNet(nn.Module):
         self.bn2d3 = nn.BatchNorm2d(128, eps=1e-04, affine=False)
         self.fc1 = nn.Linear(128 * 4 * 4, self.rep_dim, bias=False)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
         x = self.pool(F.leaky_relu(self.bn2d1(x)))
         x = self.conv2(x)
@@ -54,7 +54,7 @@ class CIFAR10_LeNet(nn.Module):
 
 
 class CIFAR10_LeNet_ELU(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         self.rep_dim = 128
@@ -68,7 +68,7 @@ class CIFAR10_LeNet_ELU(nn.Module):
         self.bn2d3 = nn.BatchNorm2d(128, eps=1e-04, affine=False)
         self.fc1 = nn.Linear(128 * 4 * 4, self.rep_dim, bias=False)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
         x = self.pool(F.elu(self.bn2d1(x)))
         x = self.conv2(x)
@@ -80,23 +80,23 @@ class CIFAR10_LeNet_ELU(nn.Module):
         return x
 
 
-def build_network(net_type):
+def build_network(net_type: str) -> nn.Module | None:
     net = None
 
-    if net_type == 'mnist_LeNet':
+    if net_type == "mnist_LeNet":
         net = MNIST_LeNet()
 
-    if net_type == 'cifar10_LeNet':
+    if net_type == "cifar10_LeNet":
         net = CIFAR10_LeNet()
 
-    if net_type == 'cifar10_LeNet_ELU':
+    if net_type == "cifar10_LeNet_ELU":
         net = CIFAR10_LeNet_ELU()
 
     return net
 
 
 class MNIST_LeNet_Autoencoder(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         self.rep_dim = 32
@@ -116,7 +116,7 @@ class MNIST_LeNet_Autoencoder(nn.Module):
         self.bn4 = nn.BatchNorm2d(8, eps=1e-04, affine=False)
         self.deconv3 = nn.ConvTranspose2d(8, 1, 5, bias=False, padding=2)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
         x = self.pool(F.leaky_relu(self.bn1(x)))
         x = self.conv2(x)
@@ -136,7 +136,7 @@ class MNIST_LeNet_Autoencoder(nn.Module):
 
 
 class CIFAR10_LeNet_Autoencoder(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         self.rep_dim = 128
@@ -144,42 +144,47 @@ class CIFAR10_LeNet_Autoencoder(nn.Module):
 
         # Encoder (must match the Deep SVDD network above)
         self.conv1 = nn.Conv2d(3, 32, 5, bias=False, padding=2)
-        nn.init.xavier_uniform_(self.conv1.weight,
-                                gain=nn.init.calculate_gain('leaky_relu'))
+        nn.init.xavier_uniform_(
+            self.conv1.weight, gain=nn.init.calculate_gain("leaky_relu")
+        )
         self.bn2d1 = nn.BatchNorm2d(32, eps=1e-04, affine=False)
         self.conv2 = nn.Conv2d(32, 64, 5, bias=False, padding=2)
-        nn.init.xavier_uniform_(self.conv2.weight,
-                                gain=nn.init.calculate_gain('leaky_relu'))
+        nn.init.xavier_uniform_(
+            self.conv2.weight, gain=nn.init.calculate_gain("leaky_relu")
+        )
         self.bn2d2 = nn.BatchNorm2d(64, eps=1e-04, affine=False)
         self.conv3 = nn.Conv2d(64, 128, 5, bias=False, padding=2)
-        nn.init.xavier_uniform_(self.conv3.weight,
-                                gain=nn.init.calculate_gain('leaky_relu'))
+        nn.init.xavier_uniform_(
+            self.conv3.weight, gain=nn.init.calculate_gain("leaky_relu")
+        )
         self.bn2d3 = nn.BatchNorm2d(128, eps=1e-04, affine=False)
         self.fc1 = nn.Linear(128 * 4 * 4, self.rep_dim, bias=False)
         self.bn1d = nn.BatchNorm1d(self.rep_dim, eps=1e-04, affine=False)
 
         # Decoder
-        self.deconv1 = nn.ConvTranspose2d(int(self.rep_dim / (4 * 4)),
-                                          128,
-                                          5,
-                                          bias=False,
-                                          padding=2)
-        nn.init.xavier_uniform_(self.deconv1.weight,
-                                gain=nn.init.calculate_gain('leaky_relu'))
+        self.deconv1 = nn.ConvTranspose2d(
+            int(self.rep_dim / (4 * 4)), 128, 5, bias=False, padding=2
+        )
+        nn.init.xavier_uniform_(
+            self.deconv1.weight, gain=nn.init.calculate_gain("leaky_relu")
+        )
         self.bn2d4 = nn.BatchNorm2d(128, eps=1e-04, affine=False)
         self.deconv2 = nn.ConvTranspose2d(128, 64, 5, bias=False, padding=2)
-        nn.init.xavier_uniform_(self.deconv2.weight,
-                                gain=nn.init.calculate_gain('leaky_relu'))
+        nn.init.xavier_uniform_(
+            self.deconv2.weight, gain=nn.init.calculate_gain("leaky_relu")
+        )
         self.bn2d5 = nn.BatchNorm2d(64, eps=1e-04, affine=False)
         self.deconv3 = nn.ConvTranspose2d(64, 32, 5, bias=False, padding=2)
-        nn.init.xavier_uniform_(self.deconv3.weight,
-                                gain=nn.init.calculate_gain('leaky_relu'))
+        nn.init.xavier_uniform_(
+            self.deconv3.weight, gain=nn.init.calculate_gain("leaky_relu")
+        )
         self.bn2d6 = nn.BatchNorm2d(32, eps=1e-04, affine=False)
         self.deconv4 = nn.ConvTranspose2d(32, 3, 5, bias=False, padding=2)
-        nn.init.xavier_uniform_(self.deconv4.weight,
-                                gain=nn.init.calculate_gain('leaky_relu'))
+        nn.init.xavier_uniform_(
+            self.deconv4.weight, gain=nn.init.calculate_gain("leaky_relu")
+        )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
         x = self.pool(F.leaky_relu(self.bn2d1(x)))
         x = self.conv2(x)
@@ -202,7 +207,7 @@ class CIFAR10_LeNet_Autoencoder(nn.Module):
 
 
 class CIFAR10_LeNet_ELU_Autoencoder(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         self.rep_dim = 128
@@ -222,11 +227,9 @@ class CIFAR10_LeNet_ELU_Autoencoder(nn.Module):
         self.bn1d = nn.BatchNorm1d(self.rep_dim, eps=1e-04, affine=False)
 
         # Decoder
-        self.deconv1 = nn.ConvTranspose2d(int(self.rep_dim / (4 * 4)),
-                                          128,
-                                          5,
-                                          bias=False,
-                                          padding=2)
+        self.deconv1 = nn.ConvTranspose2d(
+            int(self.rep_dim / (4 * 4)), 128, 5, bias=False, padding=2
+        )
         nn.init.xavier_uniform_(self.deconv1.weight)
         self.bn2d4 = nn.BatchNorm2d(128, eps=1e-04, affine=False)
         self.deconv2 = nn.ConvTranspose2d(128, 64, 5, bias=False, padding=2)
@@ -238,7 +241,7 @@ class CIFAR10_LeNet_ELU_Autoencoder(nn.Module):
         self.deconv4 = nn.ConvTranspose2d(32, 3, 5, bias=False, padding=2)
         nn.init.xavier_uniform_(self.deconv4.weight)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
         x = self.pool(F.elu(self.bn2d1(x)))
         x = self.conv2(x)
@@ -260,16 +263,16 @@ class CIFAR10_LeNet_ELU_Autoencoder(nn.Module):
         return x
 
 
-def get_Autoencoder(net_type):
+def get_Autoencoder(net_type: str) -> nn.Module | None:
     ae_net = None
 
-    if net_type == 'mnist_LeNet':
+    if net_type == "mnist_LeNet":
         ae_net = MNIST_LeNet_Autoencoder()
 
-    if net_type == 'cifar10_LeNet':
+    if net_type == "cifar10_LeNet":
         ae_net = CIFAR10_LeNet_Autoencoder()
 
-    if net_type == 'cifar10_LeNet_ELU':
+    if net_type == "cifar10_LeNet_ELU":
         ae_net = CIFAR10_LeNet_ELU_Autoencoder()
 
     return ae_net

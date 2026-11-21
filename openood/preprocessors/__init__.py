@@ -1,6 +1,6 @@
-from .base_preprocessor import BasePreprocessor
-from .cutpaste_preprocessor import CutPastePreprocessor
-from .draem_preprocessor import DRAEMPreprocessor
-from .pixmix_preprocessor import PixMixPreprocessor
-from .test_preprocessor import TestStandardPreProcessor
-from .utils import get_preprocessor
+from .base_preprocessor import BasePreprocessor as BasePreprocessor
+from .cutpaste_preprocessor import CutPastePreprocessor as CutPastePreprocessor
+from .draem_preprocessor import DRAEMPreprocessor as DRAEMPreprocessor
+from .pixmix_preprocessor import PixMixPreprocessor as PixMixPreprocessor
+from .test_preprocessor import TestStandardPreProcessor as TestStandardPreProcessor
+from .utils import get_preprocessor as get_preprocessor

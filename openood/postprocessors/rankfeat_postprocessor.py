@@ -1,19 +1,21 @@
-from typing import Any
-
 import torch
-import torch.nn as nn
+from torch import nn
+
+from openood.utils.config import Config
 
 from .base_postprocessor import BasePostprocessor
 
 
 class RankFeatPostprocessor(BasePostprocessor):
-    def __init__(self, config):
+    def __init__(self, config: Config) -> None:
         super(RankFeatPostprocessor, self).__init__(config)
         self.config = config
         self.args = self.config.postprocessor.postprocessor_args
 
     @torch.no_grad()
-    def postprocess(self, net: nn.Module, data: Any):
+    def postprocess(
+        self, net: nn.Module, data: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         inputs = data.cuda()
 
         # Logit of Block 4 feature
@@ -24,8 +26,7 @@ class RankFeatPostprocessor(BasePostprocessor):
             feat1 = feat1 - power_iteration(feat1, iter=20)
         else:
             u, s, v = torch.linalg.svd(feat1, full_matrices=False)
-            feat1 = feat1 - s[:, 0:1].unsqueeze(2) * u[:, :, 0:1].bmm(
-                v[:, 0:1, :])
+            feat1 = feat1 - s[:, 0:1].unsqueeze(2) * u[:, :, 0:1].bmm(v[:, 0:1, :])
         feat1 = feat1.view(B, C, H, W)
         logits1 = net.fc(torch.flatten(net.avgpool(feat1), 1))
 
@@ -37,8 +38,7 @@ class RankFeatPostprocessor(BasePostprocessor):
             feat2 = feat2 - power_iteration(feat2, iter=20)
         else:
             u, s, v = torch.linalg.svd(feat2, full_matrices=False)
-            feat2 = feat2 - s[:, 0:1].unsqueeze(2) * u[:, :, 0:1].bmm(
-                v[:, 0:1, :])
+            feat2 = feat2 - s[:, 0:1].unsqueeze(2) * u[:, :, 0:1].bmm(v[:, 0:1, :])
         feat2 = feat2.view(B, C, H, W)
         feat2 = net.layer4(feat2)
         logits2 = net.fc(torch.flatten(net.avgpool(feat2), 1))
@@ -46,24 +46,33 @@ class RankFeatPostprocessor(BasePostprocessor):
         # Fusion at the logit space
         logits = (logits1 + logits2) / 2
         conf = self.args.temperature * torch.logsumexp(
-            logits / self.args.temperature, dim=1)
+            logits / self.args.temperature, dim=1
+        )
 
         _, pred = torch.max(logits, dim=1)
         return pred, conf
 
 
-def _l2normalize(v, eps=1e-10):
+def _l2normalize(v: torch.Tensor, eps: float = 1e-10) -> torch.Tensor:
     return v / (torch.norm(v, dim=2, keepdim=True) + eps)
 
 
 # Power Iteration as SVD substitute for acceleration
-def power_iteration(A, iter=20):
-    u = torch.FloatTensor(1, A.size(1)).normal_(0, 1).view(
-        1, 1, A.size(1)).repeat(A.size(0), 1, 1).to(A)
-    v = torch.FloatTensor(A.size(2),
-                          1).normal_(0, 1).view(1, A.size(2),
-                                                1).repeat(A.size(0), 1,
-                                                          1).to(A)
+def power_iteration(A: torch.Tensor, iter: int = 20) -> torch.Tensor:
+    u = (
+        torch.FloatTensor(1, A.size(1))
+        .normal_(0, 1)
+        .view(1, 1, A.size(1))
+        .repeat(A.size(0), 1, 1)
+        .to(A)
+    )
+    v = (
+        torch.FloatTensor(A.size(2), 1)
+        .normal_(0, 1)
+        .view(1, A.size(2), 1)
+        .repeat(A.size(0), 1, 1)
+        .to(A)
+    )
     for _ in range(iter):
         v = _l2normalize(u.bmm(A)).transpose(1, 2)
         u = _l2normalize(A.bmm(v).transpose(1, 2))

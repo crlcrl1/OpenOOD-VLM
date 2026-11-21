@@ -3,29 +3,30 @@ import os
 import numpy as np
 import torch
 import torchvision.transforms as tvs_trans
-from PIL import Image as Image
-from PIL import ImageEnhance, ImageOps
+from PIL import Image, ImageEnhance, ImageOps
+
+from openood.utils.config import Config
 
 from .base_preprocessor import BasePreprocessor
 from .transform import Convert, interpolation_modes, normalization_dict
 
-resize_list = {
-    'osr': 32,
-    'mnist': 32,
-    'cifar10': 36,
-    'cifar100': 36,
-    'tin': 72,
-    'imagenet': 256,
-    'imagenet200': 256,
-    'aircraft': 512,
-    'cub': 512,
+resize_list: dict[str, int] = {
+    "osr": 32,
+    "mnist": 32,
+    "cifar10": 36,
+    "cifar100": 36,
+    "tin": 72,
+    "imagenet": 256,
+    "imagenet200": 256,
+    "aircraft": 512,
+    "cub": 512,
 }  # set mnist bymyself, imagenet was set to 224 by author, but 256 here
 
 
 class PixMixPreprocessor(BasePreprocessor):
-    def __init__(self, config):
+    def __init__(self, config: Config) -> None:
         self.pre_size = config.dataset.pre_size
-        self.dataset_name = config.dataset.name.split('_')[0]
+        self.dataset_name = config.dataset.name.split("_")[0]
         self.image_size = config.dataset.image_size
         self.interpolation = interpolation_modes[config.dataset.interpolation]
         normalization_type = config.dataset.normalization_type
@@ -40,53 +41,60 @@ class PixMixPreprocessor(BasePreprocessor):
 
         self.args = config.preprocessor.preprocessor_args
 
-        if 'imagenet' in config.dataset.name:
-            self.transform = tvs_trans.Compose([
-                tvs_trans.RandomResizedCrop(self.image_size,
-                                            interpolation=self.interpolation),
-                tvs_trans.RandomHorizontalFlip(0.5),
-            ])
-        elif 'aircraft' in config.dataset.name or 'cub' in config.dataset.name:
-            self.transform = tvs_trans.Compose([
-                tvs_trans.Resize(self.pre_size,
-                                 interpolation=self.interpolation),
-                tvs_trans.RandomCrop(self.image_size),
-                tvs_trans.RandomHorizontalFlip(),
-            ])
+        if "imagenet" in config.dataset.name:
+            self.transform = tvs_trans.Compose(
+                [
+                    tvs_trans.RandomResizedCrop(
+                        self.image_size, interpolation=self.interpolation
+                    ),
+                    tvs_trans.RandomHorizontalFlip(0.5),
+                ]
+            )
+        elif "aircraft" in config.dataset.name or "cub" in config.dataset.name:
+            self.transform = tvs_trans.Compose(
+                [
+                    tvs_trans.Resize(self.pre_size, interpolation=self.interpolation),
+                    tvs_trans.RandomCrop(self.image_size),
+                    tvs_trans.RandomHorizontalFlip(),
+                ]
+            )
         else:
-            self.transform = tvs_trans.Compose([
-                Convert('RGB'),
-                tvs_trans.Resize(self.pre_size,
-                                 interpolation=self.interpolation),
-                tvs_trans.CenterCrop(self.image_size),
-                tvs_trans.RandomHorizontalFlip(),
-                tvs_trans.RandomCrop(self.image_size, padding=4),
-            ])
+            self.transform = tvs_trans.Compose(
+                [
+                    Convert("RGB"),
+                    tvs_trans.Resize(self.pre_size, interpolation=self.interpolation),
+                    tvs_trans.CenterCrop(self.image_size),
+                    tvs_trans.RandomHorizontalFlip(),
+                    tvs_trans.RandomCrop(self.image_size, padding=4),
+                ]
+            )
 
-        self.mixing_set_transform = tvs_trans.Compose([
-            tvs_trans.Resize(resize_list[self.dataset_name]),
-            tvs_trans.RandomCrop(self.image_size)
-        ])
+        self.mixing_set_transform = tvs_trans.Compose(
+            [
+                tvs_trans.Resize(resize_list[self.dataset_name]),
+                tvs_trans.RandomCrop(self.image_size),
+            ]
+        )
 
-        with open(self.args.mixing_set_dir, 'r') as f:
+        with open(self.args.mixing_set_dir, "r") as f:
             self.mixing_list = f.readlines()
 
-    def __call__(self, image):
+    def __call__(self, image: Image.Image) -> torch.Tensor:
         # ? need to add random seed ?
         rnd_idx = np.random.choice(len(self.mixing_list))
-        mixing_pic_dir = self.mixing_list[rnd_idx].strip('\n')
+        mixing_pic_dir = self.mixing_list[rnd_idx].strip("\n")
 
         mixing_pic = Image.open(
-            os.path.join('./data/images_classic/',
-                         mixing_pic_dir)).convert('RGB')
+            os.path.join("./data/images_classic/", mixing_pic_dir)
+        ).convert("RGB")
         return self.pixmix(image, mixing_pic)
 
-    def augment_input(self, image):
+    def augment_input(self, image: Image.Image) -> Image.Image:
         aug_list = augmentations_all if self.args.all_ops else augmentations
         op = np.random.choice(aug_list)
         return op(image.copy(), self.args.aug_severity, self.image_size)
 
-    def pixmix(self, orig, mixing_pic):
+    def pixmix(self, orig: Image.Image, mixing_pic: Image.Image) -> torch.Tensor:
         mixings = [add, multiply]
         orig = self.transform(orig)
 
@@ -99,7 +107,6 @@ class PixMixPreprocessor(BasePreprocessor):
             mixed = self.tensorize(orig)
 
         for _ in range(np.random.randint(self.args.k + 1)):
-
             if np.random.random() < 0.5:
                 aug_image_copy = self.tensorize(self.augment_input(orig))
             else:
@@ -120,7 +127,7 @@ class PixMixPreprocessor(BasePreprocessor):
 #########################################################
 
 
-def int_parameter(level, maxval):
+def int_parameter(level: float, maxval: float) -> int:
     """Helper function to scale `val` between 0 and maxval .
 
     Args:
@@ -133,7 +140,7 @@ def int_parameter(level, maxval):
     return int(level * maxval / 10)
 
 
-def float_parameter(level, maxval):
+def float_parameter(level: float, maxval: float) -> float:
     """Helper function to scale `val` between 0 and maxval.
 
     Args:
@@ -143,106 +150,136 @@ def float_parameter(level, maxval):
     Returns:
       A float that results from scaling `maxval` according to `level`.
     """
-    return float(level) * maxval / 10.
+    return float(level) * maxval / 10.0
 
 
-def sample_level(n):
+def sample_level(n: float) -> float:
     return np.random.uniform(low=0.1, high=n)
 
 
-def autocontrast(pil_img, _, IMAGE_SIZE):
+def autocontrast(pil_img: Image.Image, _: float, IMAGE_SIZE: int) -> Image.Image:
     return ImageOps.autocontrast(pil_img)
 
 
-def equalize(pil_img, _, IMAGE_SIZE):
+def equalize(pil_img: Image.Image, _: float, IMAGE_SIZE: int) -> Image.Image:
     return ImageOps.equalize(pil_img)
 
 
-def posterize(pil_img, level, IMAGE_SIZE):
+def posterize(pil_img: Image.Image, level: float, IMAGE_SIZE: int) -> Image.Image:
     level = int_parameter(sample_level(level), 4)
     return ImageOps.posterize(pil_img, 4 - level)
 
 
-def rotate(pil_img, level, IMAGE_SIZE):
+def rotate(pil_img: Image.Image, level: float, IMAGE_SIZE: int) -> Image.Image:
     degrees = int_parameter(sample_level(level), 30)
     if np.random.uniform() > 0.5:
         degrees = -degrees
     return pil_img.rotate(degrees, resample=Image.BILINEAR)
 
 
-def solarize(pil_img, level, IMAGE_SIZE):
+def solarize(pil_img: Image.Image, level: float, IMAGE_SIZE: int) -> Image.Image:
     level = int_parameter(sample_level(level), 256)
     return ImageOps.solarize(pil_img, 256 - level)
 
 
-def shear_x(pil_img, level, IMAGE_SIZE):
+def shear_x(pil_img: Image.Image, level: float, IMAGE_SIZE: int) -> Image.Image:
     level = float_parameter(sample_level(level), 0.3)
     if np.random.uniform() > 0.5:
         level = -level
-    return pil_img.transform((IMAGE_SIZE, IMAGE_SIZE),
-                             Image.AFFINE, (1, level, 0, 0, 1, 0),
-                             resample=Image.BILINEAR)
+    return pil_img.transform(
+        (IMAGE_SIZE, IMAGE_SIZE),
+        Image.AFFINE,
+        (1, level, 0, 0, 1, 0),
+        resample=Image.BILINEAR,
+    )
 
 
-def shear_y(pil_img, level, IMAGE_SIZE):
+def shear_y(pil_img: Image.Image, level: float, IMAGE_SIZE: int) -> Image.Image:
     level = float_parameter(sample_level(level), 0.3)
     if np.random.uniform() > 0.5:
         level = -level
-    return pil_img.transform((IMAGE_SIZE, IMAGE_SIZE),
-                             Image.AFFINE, (1, 0, 0, level, 1, 0),
-                             resample=Image.BILINEAR)
+    return pil_img.transform(
+        (IMAGE_SIZE, IMAGE_SIZE),
+        Image.AFFINE,
+        (1, 0, 0, level, 1, 0),
+        resample=Image.BILINEAR,
+    )
 
 
-def translate_x(pil_img, level, IMAGE_SIZE):
+def translate_x(pil_img: Image.Image, level: float, IMAGE_SIZE: int) -> Image.Image:
     level = int_parameter(sample_level(level), IMAGE_SIZE / 3)
     if np.random.random() > 0.5:
         level = -level
-    return pil_img.transform((IMAGE_SIZE, IMAGE_SIZE),
-                             Image.AFFINE, (1, 0, level, 0, 1, 0),
-                             resample=Image.BILINEAR)
+    return pil_img.transform(
+        (IMAGE_SIZE, IMAGE_SIZE),
+        Image.AFFINE,
+        (1, 0, level, 0, 1, 0),
+        resample=Image.BILINEAR,
+    )
 
 
-def translate_y(pil_img, level, IMAGE_SIZE):
+def translate_y(pil_img: Image.Image, level: float, IMAGE_SIZE: int) -> Image.Image:
     level = int_parameter(sample_level(level), IMAGE_SIZE / 3)
     if np.random.random() > 0.5:
         level = -level
-    return pil_img.transform((IMAGE_SIZE, IMAGE_SIZE),
-                             Image.AFFINE, (1, 0, 0, 0, 1, level),
-                             resample=Image.BILINEAR)
+    return pil_img.transform(
+        (IMAGE_SIZE, IMAGE_SIZE),
+        Image.AFFINE,
+        (1, 0, 0, 0, 1, level),
+        resample=Image.BILINEAR,
+    )
 
 
 # operation that overlaps with ImageNet-C's test set
-def color(pil_img, level, IMAGE_SIZE):
+def color(pil_img: Image.Image, level: float, IMAGE_SIZE: int) -> Image.Image:
     level = float_parameter(sample_level(level), 1.8) + 0.1
     return ImageEnhance.Color(pil_img).enhance(level)
 
 
 # operation that overlaps with ImageNet-C's test set
-def contrast(pil_img, level, IMAGE_SIZE):
+def contrast(pil_img: Image.Image, level: float, IMAGE_SIZE: int) -> Image.Image:
     level = float_parameter(sample_level(level), 1.8) + 0.1
     return ImageEnhance.Contrast(pil_img).enhance(level)
 
 
 # operation that overlaps with ImageNet-C's test set
-def brightness(pil_img, level, IMAGE_SIZE):
+def brightness(pil_img: Image.Image, level: float, IMAGE_SIZE: int) -> Image.Image:
     level = float_parameter(sample_level(level), 1.8) + 0.1
     return ImageEnhance.Brightness(pil_img).enhance(level)
 
 
 # operation that overlaps with ImageNet-C's test set
-def sharpness(pil_img, level, IMAGE_SIZE):
+def sharpness(pil_img: Image.Image, level: float, IMAGE_SIZE: int) -> Image.Image:
     level = float_parameter(sample_level(level), 1.8) + 0.1
     return ImageEnhance.Sharpness(pil_img).enhance(level)
 
 
 augmentations = [
-    autocontrast, equalize, posterize, rotate, solarize, shear_x, shear_y,
-    translate_x, translate_y
+    autocontrast,
+    equalize,
+    posterize,
+    rotate,
+    solarize,
+    shear_x,
+    shear_y,
+    translate_x,
+    translate_y,
 ]
 
 augmentations_all = [
-    autocontrast, equalize, posterize, rotate, solarize, shear_x, shear_y,
-    translate_x, translate_y, color, contrast, brightness, sharpness
+    autocontrast,
+    equalize,
+    posterize,
+    rotate,
+    solarize,
+    shear_x,
+    shear_y,
+    translate_x,
+    translate_y,
+    color,
+    contrast,
+    brightness,
+    sharpness,
 ]
 
 #########################################################
@@ -250,7 +287,7 @@ augmentations_all = [
 #########################################################
 
 
-def get_ab(beta):
+def get_ab(beta: float) -> tuple[np.float32, np.float32]:
     if np.random.random() < 0.5:
         a = np.float32(np.random.beta(beta, 1))
         b = np.float32(np.random.beta(1, beta))
@@ -260,17 +297,17 @@ def get_ab(beta):
     return a, b
 
 
-def add(img1, img2, beta):
+def add(img1: torch.Tensor, img2: torch.Tensor, beta: float) -> torch.Tensor:
     a, b = get_ab(beta)
     img1, img2 = img1 * 2 - 1, img2 * 2 - 1
     out = a * img1 + b * img2
     return (out + 1) / 2
 
 
-def multiply(img1, img2, beta):
+def multiply(img1: torch.Tensor, img2: torch.Tensor, beta: float) -> torch.Tensor:
     a, b = get_ab(beta)
     img1, img2 = img1 * 2, img2 * 2
-    out = (img1**a) * (img2.clip(1e-37)**b)
+    out = (img1**a) * (img2.clip(1e-37) ** b)
     return out / 2
 
 
@@ -279,17 +316,17 @@ def multiply(img1, img2, beta):
 ########################################
 
 
-def invert(img):
+def invert(img: torch.Tensor) -> torch.Tensor:
     return 1 - img
 
 
-def screen(img1, img2, beta):
+def screen(img1: torch.Tensor, img2: torch.Tensor, beta: float) -> torch.Tensor:
     img1, img2 = invert(img1), invert(img2)
     out = multiply(img1, img2, beta)
     return invert(out)
 
 
-def overlay(img1, img2, beta):
+def overlay(img1: torch.Tensor, img2: torch.Tensor, beta: float) -> torch.Tensor:
     case1 = multiply(img1, img2, beta)
     case2 = screen(img1, img2, beta)
     if np.random.random() < 0.5:
@@ -299,7 +336,9 @@ def overlay(img1, img2, beta):
     return torch.where(cond, case1, case2)
 
 
-def darken_or_lighten(img1, img2, beta):
+def darken_or_lighten(
+    img1: torch.Tensor, img2: torch.Tensor, beta: float
+) -> torch.Tensor:
     if np.random.random() < 0.5:
         cond = img1 < img2
     else:
@@ -307,7 +346,7 @@ def darken_or_lighten(img1, img2, beta):
     return torch.where(cond, img1, img2)
 
 
-def swap_channel(img1, img2, beta):
+def swap_channel(img1: torch.Tensor, img2: torch.Tensor, beta: float) -> torch.Tensor:
     channel = np.random.randint(3)
     img1[channel] = img2[channel]
     return img1

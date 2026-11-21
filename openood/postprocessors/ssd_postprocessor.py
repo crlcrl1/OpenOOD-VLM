@@ -1,11 +1,14 @@
-import torch
-import torch.nn as nn
+from torch import nn
+
+from openood._typing import LoaderDict, OODLoaders
+from openood.utils.config import Config
+
 from .base_postprocessor import BasePostprocessor
 from .mds_ensemble_postprocessor import get_MDS_stat
 
 
 class SSDPostprocessor(BasePostprocessor):
-    def __init__(self, config):
+    def __init__(self, config: Config) -> None:
         self.config = config
         self.postprocessor_args = config.postprocessor.postprocessor_args
 
@@ -18,7 +21,13 @@ class SSDPostprocessor(BasePostprocessor):
 
         self.feature_mean, self.feature_prec = None, None
 
-    def setup(self, net: nn.Module, id_loader_dict, ood_loader_dict):
-        self.feature_mean, self.feature_prec, self.transform_matrix = \
-            get_MDS_stat(net, id_loader_dict['train'], self.num_classes,
-                         self.feature_type_list, self.reduce_dim_list)
+    def setup(
+        self, net: nn.Module, id_loader_dict: LoaderDict, ood_loader_dict: OODLoaders
+    ) -> None:
+        self.feature_mean, self.feature_prec, self.transform_matrix = get_MDS_stat(
+            net,
+            id_loader_dict["train"],
+            self.num_classes,
+            self.feature_type_list,
+            self.reduce_dim_list,
+        )

@@ -1,6 +1,6 @@
 network:
   name: vit
-  model: openood/networks/vit-base-p16-384.py
+  model: openood/networks/vit.py
   num_classes: '@{dataset.num_classes}'
   image_size: '@{dataset.image_size}'
   pretrained: True          # set 'True' to load pretrained model

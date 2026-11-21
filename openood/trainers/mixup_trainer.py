@@ -1,24 +1,28 @@
+from collections.abc import Mapping
+
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import openood.utils.comm as comm
+from openood._typing import Metrics
 from openood.losses import soft_cross_entropy
-from openood.utils import Config
+from openood.utils import Config, comm
 
 from .lr_scheduler import cosine_annealing
 
 
-def prepare_mixup(batch, alpha=1.0, use_cuda=True):
+def prepare_mixup(
+    batch: Mapping[str, torch.Tensor], alpha: float = 1.0, use_cuda: bool = True
+) -> tuple[torch.Tensor, float]:
     """Returns mixed inputs, pairs of targets, and lambda."""
     if alpha > 0:
         lam = np.random.beta(alpha, alpha)
     else:
         lam = 1
 
-    batch_size = batch['data'].size()[0]
+    batch_size = batch["data"].size()[0]
     if use_cuda:
         index = torch.randperm(batch_size).cuda()
     else:
@@ -27,13 +31,14 @@ def prepare_mixup(batch, alpha=1.0, use_cuda=True):
     return index, lam
 
 
-def mixing(data, index, lam):
+def mixing(data: torch.Tensor, index: torch.Tensor, lam: float) -> torch.Tensor:
     return lam * data + (1 - lam) * data[index]
 
 
 class MixupTrainer:
-    def __init__(self, net: nn.Module, train_loader: DataLoader,
-                 config: Config) -> None:
+    def __init__(
+        self, net: nn.Module, train_loader: DataLoader, config: Config
+    ) -> None:
 
         self.net = net
         self.train_loader = train_loader
@@ -57,27 +62,29 @@ class MixupTrainer:
                 1e-6 / config.optimizer.lr,
             ),
         )
-    def setup(self):
-        pass 
-    
-    def train_epoch(self, epoch_idx):
+
+    def setup(self) -> None:
+        pass
+
+    def train_epoch(self, epoch_idx: int) -> tuple[nn.Module, Metrics]:
         self.net.train()
 
         loss_avg = 0.0
         train_dataiter = iter(self.train_loader)
 
-        for train_step in tqdm(range(1,
-                                     len(train_dataiter) + 1),
-                               desc='Epoch {:03d}: '.format(epoch_idx),
-                               position=0,
-                               leave=True,
-                               disable=not comm.is_main_process()):
+        for train_step in tqdm(
+            range(1, len(train_dataiter) + 1),
+            desc="Epoch {:03d}: ".format(epoch_idx),
+            position=0,
+            leave=True,
+            disable=not comm.is_main_process(),
+        ):
             batch = next(train_dataiter)
 
             # mixup operation
             index, lam = prepare_mixup(batch, self.alpha)
-            data_mix = mixing(batch['data'].cuda(), index, lam)
-            soft_label_mix = mixing(batch['soft_label'].cuda(), index, lam)
+            data_mix = mixing(batch["data"].cuda(), index, lam)
+            soft_label_mix = mixing(batch["soft_label"].cuda(), index, lam)
 
             # forward
             logits_classifier = self.net(data_mix)
@@ -93,8 +100,8 @@ class MixupTrainer:
             with torch.no_grad():
                 loss_avg = loss_avg * 0.8 + float(loss) * 0.2
 
-        metrics = {}
-        metrics['epoch_idx'] = epoch_idx
-        metrics['loss'] = loss_avg
+        metrics: Metrics = {}
+        metrics["epoch_idx"] = epoch_idx
+        metrics["loss"] = loss_avg
 
         return self.net, metrics

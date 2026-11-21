@@ -1,6 +1,7 @@
 import requests
 
-def fetch_all_titles(limit=100):
+
+def fetch_all_titles(limit: int = 100) -> list[str]:
     """
     使用 Wikipedia API 提取页面标题。
     :param limit: 每次请求的页面数量（最大值 500）。

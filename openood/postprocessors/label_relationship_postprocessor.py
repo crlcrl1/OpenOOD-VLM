@@ -1,44 +1,48 @@
-from typing import Any
-import numpy as np
+from collections.abc import Sequence
+
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch import nn
 from tqdm import tqdm
-import openood.utils.comm as comm
+
+from openood._typing import LoaderDict, OODLoaders
+from openood.utils.config import Config
 
 from .base_postprocessor import BasePostprocessor
-import pdb
 
 
 class LabelRelationPostprocessor(BasePostprocessor):
-    def __init__(self, config):
+    def __init__(self, config: Config) -> None:
         super(LabelRelationPostprocessor, self).__init__(config)
         self.args = self.config.postprocessor.postprocessor_args
         self.tau = self.args.tau
         self.beta = float(self.args.beta)
         self.args_dict = self.config.postprocessor.postprocessor_sweep
-        self.in_score = self.args.in_score # sum | max
+        self.in_score = self.args.in_score  # sum | max
         self.setup_flag = True
         self.proj_flag = False
         self.group_num = self.args.group_num
         self.random_permute = self.args.random_permute
         self.reset = True
-    
+
     ###### 统计每个类sample score (MCM and Neglabel) 的均值和方差。使用GT 的label 还是predict label 呢？
-    ## 也需要统计OOD sample 的分类别的均值和方差 (这里只能用predict label了)。 
-    def setup(self, net: nn.Module, id_loader_dict, ood_loader_dict):
-        ### 
+    ## 也需要统计OOD sample 的分类别的均值和方差 (这里只能用predict label了)。
+    def setup(
+        self, net: nn.Module, id_loader_dict: LoaderDict, ood_loader_dict: OODLoaders
+    ) -> None:
+        ###
         net.eval()
 
-        output_text = net.logit_scale * net.text_features.t() @ net.text_features # batch * class.
-        score_output_text = torch.softmax(output_text/self.beta , dim=1)
+        output_text = (
+            net.logit_scale * net.text_features.t() @ net.text_features
+        )  # batch * class.
+        score_output_text = torch.softmax(output_text / self.beta, dim=1)
         self.score_prior = score_output_text[:1000, :1000].sum(1)
 
-
         class_num = net.n_cls
-        id_loader = id_loader_dict['test']
-        ood_loader = ood_loader_dict['farood']['places']  ##['inaturalist', 'sun', 'places', 'dtd']  ## nearood: ssb_hard; ninco
+        id_loader = id_loader_dict["test"]
+        ood_loader = ood_loader_dict["farood"][
+            "places"
+        ]  ##['inaturalist', 'sun', 'places', 'dtd']  ## nearood: ssb_hard; ninco
         # pdb.set_trace()
         id_mcm_score_gt_list = []
         for i in range(class_num):
@@ -60,45 +64,50 @@ class LabelRelationPostprocessor(BasePostprocessor):
             ood_neglabel_score_list.append([])
 
         for batch in tqdm(id_loader, disable=False):
-            data = batch['data'].cuda()
-            label = batch['label'].cuda()
+            data = batch["data"].cuda()
+            label = batch["label"].cuda()
             image_features, text_features, logit_scale = net(data, return_feat=True)
             # image_classifier = self.image_classifier
-    
 
-            output = logit_scale * image_features @ text_features.t() # batch * class.
+            output = logit_scale * image_features @ text_features.t()  # batch * class.
             # pdb.set_trace()  ##(text_features * self.image_classifier).sum(1), around 0.3, indicating that there is a large discrepancy between text and image feat, thus they should be complementary.
             _, pred_in = torch.max(output[:, :class_num], dim=1)
 
-            ############################### only score in. here is a 
+            ############################### only score in. here is a
             output_only_in = output[:, :class_num]
             score_only_in = torch.softmax(output_only_in / self.tau, dim=1)
             mcm_score, pred_only_in = torch.max(score_only_in, dim=1)
             # cosin_only_in, _ = torch.max(output_only_in, dim=1)
             # ###########
             # print('pay attention, no scale is applied here.')
-            pos_logit = output[:, :class_num] ## B*C
-            neg_logit = output[:, class_num:] ## B*total_neg_num
+            pos_logit = output[:, :class_num]  ## B*C
+            neg_logit = output[:, class_num:]  ## B*total_neg_num
             drop = neg_logit.size(1) % self.group_num
             if drop > 0:
                 neg_logit = neg_logit[:, :-drop]
 
             if self.random_permute:
                 # print('use random permute')
-                SEED=0
+                SEED = 0
                 torch.manual_seed(SEED)
                 torch.cuda.manual_seed(SEED)
                 idx = torch.randperm(neg_logit.shape[1]).to(output.device)
-                neg_logit = neg_logit.T ## total_neg_num*B
+                neg_logit = neg_logit.T  ## total_neg_num*B
                 # pdb.set_trace()
-                neg_logit = neg_logit[idx].T.reshape(pos_logit.shape[0], self.group_num, -1).contiguous()
+                neg_logit = (
+                    neg_logit[idx]
+                    .T.reshape(pos_logit.shape[0], self.group_num, -1)
+                    .contiguous()
+                )
             else:
-                neg_logit = neg_logit.reshape(pos_logit.shape[0], self.group_num, -1).contiguous()
+                neg_logit = neg_logit.reshape(
+                    pos_logit.shape[0], self.group_num, -1
+                ).contiguous()
             scores = []
             for i in range(self.group_num):
-                full_sim = torch.cat([pos_logit, neg_logit[:, i, :]], dim=-1) 
+                full_sim = torch.cat([pos_logit, neg_logit[:, i, :]], dim=-1)
                 full_sim = full_sim.softmax(dim=-1)
-                pos_score = full_sim[:, :pos_logit.shape[1]].sum(dim=-1)
+                pos_score = full_sim[:, : pos_logit.shape[1]].sum(dim=-1)
                 scores.append(pos_score.unsqueeze(-1))
             scores = torch.cat(scores, dim=-1)
             conf_in = scores.mean(dim=-1)
@@ -110,13 +119,17 @@ class LabelRelationPostprocessor(BasePostprocessor):
             # else:
             #     raise NotImplementedError
             if torch.isnan(neglabel_score).any():
-                pdb.set_trace()
+                breakpoint()
             for i in range(len(label)):
                 id_mcm_score_gt_list[label[i]].append(mcm_score[i].cpu().unsqueeze(0))
-                id_neglabel_score_gt_list[label[i]].append(neglabel_score[i].cpu().unsqueeze(0))
+                id_neglabel_score_gt_list[label[i]].append(
+                    neglabel_score[i].cpu().unsqueeze(0)
+                )
 
                 id_mcm_score_list[pred_in[i]].append(mcm_score[i].cpu().unsqueeze(0))
-                id_neglabel_score_list[pred_in[i]].append(neglabel_score[i].cpu().unsqueeze(0))
+                id_neglabel_score_list[pred_in[i]].append(
+                    neglabel_score[i].cpu().unsqueeze(0)
+                )
 
         id_mcm_score_gt_std = []
         id_neglabel_score_gt_std = []
@@ -128,13 +141,23 @@ class LabelRelationPostprocessor(BasePostprocessor):
             id_mcm_score_gt_std.append(torch.std(id_mcm_score_gt_list[i]).item())
             id_mcm_score_gt_list[i] = torch.mean(id_mcm_score_gt_list[i]).item()
 
-            id_neglabel_score_gt_list[i] = torch.cat(id_neglabel_score_gt_list[i], dim=0)
-            id_neglabel_score_gt_std.append(torch.std(id_neglabel_score_gt_list[i]).item())
-            id_neglabel_score_gt_list[i] = torch.mean(id_neglabel_score_gt_list[i]).item()
+            id_neglabel_score_gt_list[i] = torch.cat(
+                id_neglabel_score_gt_list[i], dim=0
+            )
+            id_neglabel_score_gt_std.append(
+                torch.std(id_neglabel_score_gt_list[i]).item()
+            )
+            id_neglabel_score_gt_list[i] = torch.mean(
+                id_neglabel_score_gt_list[i]
+            ).item()
 
             if len(id_mcm_score_list[i]) != 0:
-                id_prection_count.append(len(id_mcm_score_list[i]))  ## count distribution of the prediction.
-                id_mcm_score_list[i] = torch.cat(id_mcm_score_list[i], dim=0)  ### 有可能是空的，并不一定要assign top1 label; 比如top1 那个类很多都是0.9+, 一个0.6的score 可能并不是这一类的，要看top2,3. 
+                id_prection_count.append(
+                    len(id_mcm_score_list[i])
+                )  ## count distribution of the prediction.
+                id_mcm_score_list[i] = torch.cat(
+                    id_mcm_score_list[i], dim=0
+                )  ### 有可能是空的，并不一定要assign top1 label; 比如top1 那个类很多都是0.9+, 一个0.6的score 可能并不是这一类的，要看top2,3.
                 # 现在的问题是，他就是有空的，那么如果是空的，就保持不变 []; soft加权来指定他的类别。
                 id_mcm_score_std.append(torch.std(id_mcm_score_list[i]).item())
                 id_mcm_score_list[i] = torch.mean(id_mcm_score_list[i]).item()
@@ -146,54 +169,61 @@ class LabelRelationPostprocessor(BasePostprocessor):
 
             if len(id_neglabel_score_list[i]) != 0:
                 id_neglabel_score_list[i] = torch.cat(id_neglabel_score_list[i], dim=0)
-                id_neglabel_score_std.append(torch.std(id_neglabel_score_list[i]).item())
+                id_neglabel_score_std.append(
+                    torch.std(id_neglabel_score_list[i]).item()
+                )
                 id_neglabel_score_list[i] = torch.mean(id_neglabel_score_list[i]).item()
 
             else:
                 id_neglabel_score_list[i] = 0.5
                 id_neglabel_score_std.append(0)
         # pdb.set_trace()
-        #################### for ood 
-        for batch in tqdm(ood_loader,
-                          disable=False):
-            data = batch['data'].cuda()
-            label = batch['label'].cuda()
+        #################### for ood
+        for batch in tqdm(ood_loader, disable=False):
+            data = batch["data"].cuda()
+            label = batch["label"].cuda()
             image_features, text_features, logit_scale = net(data, return_feat=True)
             # image_classifier = self.image_classifier
 
-            output = logit_scale * image_features @ text_features.t() # batch * class.
+            output = logit_scale * image_features @ text_features.t()  # batch * class.
             # pdb.set_trace()  ##(text_features * self.image_classifier).sum(1), around 0.3, indicating that there is a large discrepancy between text and image feat, thus they should be complementary.
             _, pred_in = torch.max(output[:, :class_num], dim=1)
 
-            ############################### only score in. here is a 
+            ############################### only score in. here is a
             output_only_in = output[:, :class_num]
             score_only_in = torch.softmax(output_only_in / self.tau, dim=1)
             mcm_score, pred_only_in = torch.max(score_only_in, dim=1)
             # cosin_only_in, _ = torch.max(output_only_in, dim=1)
             # ###########
             # print('pay attention, no scale is applied here.')
-            pos_logit = output[:, :class_num] ## B*C
-            neg_logit = output[:, class_num:] ## B*total_neg_num
+            pos_logit = output[:, :class_num]  ## B*C
+            neg_logit = output[:, class_num:]  ## B*total_neg_num
             drop = neg_logit.size(1) % self.group_num
             if drop > 0:
                 neg_logit = neg_logit[:, :-drop]
 
             if self.random_permute:
                 # print('use random permute')
-                SEED=0
+                SEED = 0
                 torch.manual_seed(SEED)
                 torch.cuda.manual_seed(SEED)
                 idx = torch.randperm(neg_logit.shape[1]).to(output.device)
-                neg_logit = neg_logit.T ## total_neg_num*B
+                neg_logit = neg_logit.T  ## total_neg_num*B
                 # pdb.set_trace()
-                neg_logit = neg_logit[idx].T.reshape(pos_logit.shape[0], self.group_num, -1).contiguous()
+                neg_logit = (
+                    neg_logit[idx]
+                    .T.reshape(pos_logit.shape[0], self.group_num, -1)
+                    .contiguous()
+                )
             else:
-                neg_logit = neg_logit.reshape(pos_logit.shape[0], self.group_num, -1).contiguous()
+                neg_logit = neg_logit.reshape(
+                    pos_logit.shape[0], self.group_num, -1
+                ).contiguous()
             scores = []
             for i in range(self.group_num):
-                full_sim = torch.cat([pos_logit, neg_logit[:, i, :]], dim=-1) 
+                full_sim = torch.cat([pos_logit, neg_logit[:, i, :]], dim=-1)
                 full_sim = full_sim.softmax(dim=-1)
-                pos_score = full_sim[:, :pos_logit.shape[1]].sum(dim=-1)
+                pos_score = full_sim[:, : pos_logit.shape[1]].sum(dim=-1)
                 scores.append(pos_score.unsqueeze(-1))
             scores = torch.cat(scores, dim=-1)
             conf_in = scores.mean(dim=-1)
@@ -205,11 +235,12 @@ class LabelRelationPostprocessor(BasePostprocessor):
             # else:
             #     raise NotImplementedError
             if torch.isnan(neglabel_score).any():
-                pdb.set_trace()
+                breakpoint()
             for i in range(len(label)):
                 ood_mcm_score_list[pred_in[i]].append(mcm_score[i].cpu().unsqueeze(0))
-                ood_neglabel_score_list[pred_in[i]].append(neglabel_score[i].cpu().unsqueeze(0))    
-
+                ood_neglabel_score_list[pred_in[i]].append(
+                    neglabel_score[i].cpu().unsqueeze(0)
+                )
 
         ood_mcm_score_std = []
         ood_neglabel_score_std = []
@@ -217,7 +248,9 @@ class LabelRelationPostprocessor(BasePostprocessor):
         for i in range(class_num):
             if len(ood_mcm_score_list[i]) != 0:
                 ood_prection_count.append(len(ood_mcm_score_list[i]))
-                ood_mcm_score_list[i] = torch.cat(ood_mcm_score_list[i], dim=0)  ### 有可能是空的，并不一定要assign top1 label; 比如top1 那个类很多都是0.9+, 一个0.6的score 可能并不是这一类的，要看top2,3. 
+                ood_mcm_score_list[i] = torch.cat(
+                    ood_mcm_score_list[i], dim=0
+                )  ### 有可能是空的，并不一定要assign top1 label; 比如top1 那个类很多都是0.9+, 一个0.6的score 可能并不是这一类的，要看top2,3.
                 # 现在的问题是，他就是有空的，那么如果是空的，就保持不变 []; soft加权来指定他的类别。
                 ood_mcm_score_std.append(torch.std(ood_mcm_score_list[i]).item())
                 ood_mcm_score_list[i] = torch.mean(ood_mcm_score_list[i]).item()
@@ -227,9 +260,15 @@ class LabelRelationPostprocessor(BasePostprocessor):
                 ood_mcm_score_list[i] = 0.5
                 ood_mcm_score_std.append(0)
             if len(ood_neglabel_score_list[i]) != 0:
-                ood_neglabel_score_list[i] = torch.cat(ood_neglabel_score_list[i], dim=0)
-                ood_neglabel_score_std.append(torch.std(ood_neglabel_score_list[i]).item())
-                ood_neglabel_score_list[i] = torch.mean(ood_neglabel_score_list[i]).item()
+                ood_neglabel_score_list[i] = torch.cat(
+                    ood_neglabel_score_list[i], dim=0
+                )
+                ood_neglabel_score_std.append(
+                    torch.std(ood_neglabel_score_list[i]).item()
+                )
+                ood_neglabel_score_list[i] = torch.mean(
+                    ood_neglabel_score_list[i]
+                ).item()
 
             else:
                 ood_neglabel_score_list[i] = 0.5
@@ -237,15 +276,15 @@ class LabelRelationPostprocessor(BasePostprocessor):
         self.id_neglabel_score_gt_list = id_neglabel_score_gt_list  ### 先用GT式一下，如果有效，那么GT应该也是有效的。
         self.id_neglabel_score_gt_std = id_neglabel_score_gt_std
 
-    #     # 把ID ood 的均值方差画到一张图上，来facilitate 设计category wise threshold. 
+    #     # 把ID ood 的均值方差画到一张图上，来facilitate 设计category wise threshold.
 
-    def reset_memory(self):
+    def reset_memory(self) -> None:
         self.reset = True
 
-
-
     @torch.no_grad()
-    def postprocess(self, net: nn.Module, data: Any):
+    def postprocess(
+        self, net: nn.Module, data: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         net.eval()
         class_num = net.n_cls
         if self.reset:
@@ -256,50 +295,54 @@ class LabelRelationPostprocessor(BasePostprocessor):
         image_features, text_features, logit_scale = net(data, return_feat=True)
         # image_classifier = self.image_classifier
 
-        output = logit_scale * image_features @ text_features.t() # batch * class.
+        output = logit_scale * image_features @ text_features.t()  # batch * class.
         # pdb.set_trace()  ##(text_features * self.image_classifier).sum(1), around 0.3, indicating that there is a large discrepancy between text and image feat, thus they should be complementary.
-        _, pred_in = torch.max(output[:, :class_num], dim=1) 
+        _, pred_in = torch.max(output[:, :class_num], dim=1)
 
-        normalized_count = self.class_count.float() / self.class_count.sum() ### 
+        normalized_count = self.class_count.float() / self.class_count.sum()  ###
         # pdb.set_trace()
-        ############################### only score in. here is a 
+        ############################### only score in. here is a
         # output_only_in = output[:, :class_num]
         # score_only_in = torch.softmax(output_only_in / self.tau, dim=1)
         # mcm_score, pred_only_in = torch.max(score_only_in, dim=1)
         # cosin_only_in, _ = torch.max(output_only_in, dim=1)
         # ###########
         # print('pay attention, no scale is applied here.')
-        pos_logit = output[:, :class_num] ## B*C
-        neg_logit = output[:, class_num:] ## B*total_neg_num
+        pos_logit = output[:, :class_num]  ## B*C
+        neg_logit = output[:, class_num:]  ## B*total_neg_num
         drop = neg_logit.size(1) % self.group_num
         if drop > 0:
             neg_logit = neg_logit[:, :-drop]
 
         if self.random_permute:
             # print('use random permute')
-            SEED=0
+            SEED = 0
             torch.manual_seed(SEED)
             torch.cuda.manual_seed(SEED)
             idx = torch.randperm(neg_logit.shape[1]).to(output.device)
-            neg_logit = neg_logit.T ## total_neg_num*B
+            neg_logit = neg_logit.T  ## total_neg_num*B
             # pdb.set_trace()
-            neg_logit = neg_logit[idx].T.reshape(pos_logit.shape[0], self.group_num, -1).contiguous()
+            neg_logit = (
+                neg_logit[idx]
+                .T.reshape(pos_logit.shape[0], self.group_num, -1)
+                .contiguous()
+            )
         else:
-            neg_logit = neg_logit.reshape(pos_logit.shape[0], self.group_num, -1).contiguous()
+            neg_logit = neg_logit.reshape(
+                pos_logit.shape[0], self.group_num, -1
+            ).contiguous()
         scores = []
         for i in range(self.group_num):
-            full_sim = torch.cat([pos_logit, neg_logit[:, i, :]], dim=-1) 
+            full_sim = torch.cat([pos_logit, neg_logit[:, i, :]], dim=-1)
             full_sim = full_sim.softmax(dim=-1)
-            pos_score = full_sim[:, :pos_logit.shape[1]].sum(dim=-1)
+            pos_score = full_sim[:, : pos_logit.shape[1]].sum(dim=-1)
             scores.append(pos_score.unsqueeze(-1))
         scores = torch.cat(scores, dim=-1)
-        conf_in = scores.mean(dim=-1).float() 
-        ### 先算score, 在更新count. 
+        conf_in = scores.mean(dim=-1).float()
+        ### 先算score, 在更新count.
         for i in range(len(pred_in)):
             self.class_count[pred_in[i].item()] += 1
         # pdb.set_trace()
-
- 
 
         # pdb.set_trace()
         # score = torch.softmax(output, dim=1)
@@ -307,27 +350,33 @@ class LabelRelationPostprocessor(BasePostprocessor):
         # conf_out = torch.sum(score[:, class_num:], dim=1)
 
         # max in prob - max out prob
-        if self.in_score == 'sum':
+        if self.in_score == "sum":
             conf_in = conf_in  ## = 1-conf_out
-        elif self.in_score == 'div_mean':
+        elif self.in_score == "div_mean":
             for i in range(len(conf_in)):
-                conf_in[i] = conf_in[i] / self.id_neglabel_score_gt_list[pred_in[i]] ## score mean for each class, class wise rescaling. 统计均值和方差，然后建模成高斯分布。减均值除以标准差
-        elif self.in_score == 'div_score_prior':
+                conf_in[i] = (
+                    conf_in[i] / self.id_neglabel_score_gt_list[pred_in[i]]
+                )  ## score mean for each class, class wise rescaling. 统计均值和方差，然后建模成高斯分布。减均值除以标准差
+        elif self.in_score == "div_score_prior":
             for i in range(len(conf_in)):
-                conf_in[i] = conf_in[i] / self.score_prior[pred_in[i]] 
-        elif self.in_score == 'jian_mean':
+                conf_in[i] = conf_in[i] / self.score_prior[pred_in[i]]
+        elif self.in_score == "jian_mean":
             for i in range(len(conf_in)):
-                conf_in[i] = conf_in[i] - self.id_neglabel_score_gt_list[pred_in[i]] 
-        elif self.in_score == 'jian_mean_div_std':
+                conf_in[i] = conf_in[i] - self.id_neglabel_score_gt_list[pred_in[i]]
+        elif self.in_score == "jian_mean_div_std":
             for i in range(len(conf_in)):
-                conf_in[i] = (conf_in[i] - self.id_neglabel_score_gt_list[pred_in[i]]) /  self.id_neglabel_score_gt_std[pred_in[i]]
-        elif self.in_score == 'div_count':
+                conf_in[i] = (
+                    conf_in[i] - self.id_neglabel_score_gt_list[pred_in[i]]
+                ) / self.id_neglabel_score_gt_std[pred_in[i]]
+        elif self.in_score == "div_count":
             for i in range(len(conf_in)):
-                conf_in[i] = conf_in[i] / normalized_count[pred_in[i]] / net.n_cls ### 错了，normalized_count 要根据label 找。
+                conf_in[i] = (
+                    conf_in[i] / normalized_count[pred_in[i]] / net.n_cls
+                )  ### 错了，normalized_count 要根据label 找。
         else:
             raise NotImplementedError
         if torch.isnan(conf_in).any():
-            pdb.set_trace()
+            breakpoint()
 
         return pred_in, conf_in
 
@@ -338,7 +387,7 @@ class LabelRelationPostprocessor(BasePostprocessor):
     #     pred_list, conf_list, label_list = [], [], []
     #     for batch in tqdm(data_loader,
     #                       disable=not progress or not comm.is_main_process()):
- 
+
     #         data = batch['data'].cuda()
     #         label = batch['label'].cuda()
     #         pdb.set_trace()
@@ -355,11 +404,12 @@ class LabelRelationPostprocessor(BasePostprocessor):
 
     #     return pred_list, conf_list, label_list
 
-    def set_hyperparam(self, hyperparam: list):
+    def set_hyperparam(self, hyperparam: Sequence[float]) -> None:
         self.tau = hyperparam[0]
 
-    def get_hyperparam(self):
+    def get_hyperparam(self) -> float:
         return self.tau
+
 
 # 我也尝试了，对于每个样本选出最近的1000 个negative labels, 这样效果也不好。
 # vanilla label relation
@@ -375,7 +425,7 @@ class LabelRelationPostprocessor(BasePostprocessor):
 #         self.proj_flag = False
 #         self.group_num = self.args.group_num
 #         self.random_permute = self.args.random_permute
-    
+
 #     def setup(self, net: nn.Module, id_loader_dict, ood_loader_dict):
 #         ### get the image feature of each classes, construct the image feature classifier/memory.
 #         net.eval()
@@ -390,13 +440,13 @@ class LabelRelationPostprocessor(BasePostprocessor):
 #         # if self.setup_flag:
 #         #     similarity = all_text_features @ pos_neg_text_features.t() ## all * ID_Negative class
 #         #     # pdb.set_trace()
-#         #     self.relation = (similarity * net.logit_scale).softmax(dim=-1)[:,:class_num].sum(-1) 
+#         #     self.relation = (similarity * net.logit_scale).softmax(dim=-1)[:,:class_num].sum(-1)
 #         #     ## adopt the Neglabel score as the relation; 最后的image score 其实是相似的text score 的 加权和。
 #         #     self.setup_flag = False
 #         # else:
 #         #     pass
 
-#         #################################### only use the ID class to calculate the relation. 
+#         #################################### only use the ID class to calculate the relation.
 #         pos_text_features = pos_neg_text_features[:class_num, :] ## class * dim
 #         # pdb.set_trace()
 #         if self.setup_flag:
@@ -416,7 +466,7 @@ class LabelRelationPostprocessor(BasePostprocessor):
 #         image_features, text_features, logit_scale = net(data, return_feat=True)
 #         # image_classifier = self.image_classifier
 
-#         ## image_features: 256*512, 
+#         ## image_features: 256*512,
 #         ## text_features: 11k*7*512
 #         ## extract sample adaptative classifier via attention,
 #         output = logit_scale * image_features @ text_features.t() # batch * class.
@@ -454,7 +504,7 @@ class LabelRelationPostprocessor(BasePostprocessor):
 #         scores = []
 #         # pdb.set_trace()
 #         for i in range(self.group_num):
-#             full_sim = torch.cat([pos_logit, neg_logit[:, i, :]], dim=-1) 
+#             full_sim = torch.cat([pos_logit, neg_logit[:, i, :]], dim=-1)
 #             # full_prob = full_sim ## 直接用full sim 来做加权，导致正负比较难拉开，结果不好。
 
 #             # pdb.set_trace()
@@ -463,7 +513,7 @@ class LabelRelationPostprocessor(BasePostprocessor):
 #             # max_value, _ = full_sim_rescale.max(0) ## 11k
 #             # min_value, _ = full_sim_rescale.min(0) ## 11k
 #             # full_sim_rescale = (full_sim_rescale - min_value.view(1, -1)) / (max_value - min_value).view(1, -1)
-#             # full_prob = torch.exp(-self.beta * (1-full_sim_rescale)) 
+#             # full_prob = torch.exp(-self.beta * (1-full_sim_rescale))
 
 #             full_prob = full_sim.softmax(dim=-1) ## N * class_num ### 这里是一个soft weight, 是比较好的。
 
@@ -493,7 +543,7 @@ class LabelRelationPostprocessor(BasePostprocessor):
 
 #         # max in prob - max out prob
 #         if self.in_score == 'oodscore' or self.in_score == 'sum':
-#             conf = conf_in  ## 
+#             conf = conf_in  ##
 #         else:
 #             raise NotImplementedError
 #         if torch.isnan(conf).any():
@@ -506,5 +556,3 @@ class LabelRelationPostprocessor(BasePostprocessor):
 
 #     def get_hyperparam(self):
 #         return self.tau
-
- 

@@ -1,17 +1,60 @@
-from torchvision.models.resnet import Bottleneck, ResNet
+from collections.abc import Sequence
+from typing import Literal, overload
+
+import numpy as np
+from torch import Tensor, nn
+from torchvision.models.resnet import BasicBlock, Bottleneck, ResNet
 
 
 class ResNet50(ResNet):
-    def __init__(self,
-                 block=Bottleneck,
-                 layers=[3, 4, 6, 3],
-                 num_classes=1000):
-        super(ResNet50, self).__init__(block=block,
-                                       layers=layers,
-                                       num_classes=num_classes)
+    def __init__(
+        self,
+        block: type[BasicBlock | Bottleneck] = Bottleneck,
+        layers: Sequence[int] = [3, 4, 6, 3],
+        num_classes: int = 1000,
+    ) -> None:
+        super(ResNet50, self).__init__(
+            block=block, layers=layers, num_classes=num_classes
+        )
         self.feature_size = 2048
 
-    def forward(self, x, return_feature=False, return_feature_list=False):
+    @overload
+    def forward(
+        self,
+        x: Tensor,
+        return_feature: Literal[False] = False,
+        return_feature_list: Literal[False] = False,
+    ) -> Tensor: ...
+
+    @overload
+    def forward(
+        self,
+        x: Tensor,
+        return_feature: Literal[True],
+        return_feature_list: bool = False,
+    ) -> tuple[Tensor, Tensor]: ...
+
+    @overload
+    def forward(
+        self,
+        x: Tensor,
+        return_feature: Literal[False] = False,
+        *,
+        return_feature_list: Literal[True],
+    ) -> tuple[Tensor, list[Tensor]]: ...
+
+    @overload
+    def forward(
+        self,
+        x: Tensor,
+        return_feature: Literal[False],
+        return_feature_list: Literal[True],
+        /,
+    ) -> tuple[Tensor, list[Tensor]]: ...
+
+    def forward(
+        self, x: Tensor, return_feature: bool = False, return_feature_list: bool = False
+    ) -> tuple[Tensor, Tensor] | tuple[Tensor, list[Tensor]] | Tensor:
         feature1 = self.relu(self.bn1(self.conv1(x)))
         feature1 = self.maxpool(feature1)
         feature2 = self.layer1(feature1)
@@ -30,7 +73,7 @@ class ResNet50(ResNet):
         else:
             return logits_cls
 
-    def forward_threshold(self, x, threshold):
+    def forward_threshold(self, x: Tensor, threshold: float) -> Tensor:
         feature1 = self.relu(self.bn1(self.conv1(x)))
         feature1 = self.maxpool(feature1)
         feature2 = self.layer1(feature1)
@@ -44,7 +87,7 @@ class ResNet50(ResNet):
 
         return logits_cls
 
-    def intermediate_forward(self, x, layer_index):
+    def intermediate_forward(self, x: Tensor, layer_index: int) -> Tensor:
         out = self.relu(self.bn1(self.conv1(x)))
         out = self.maxpool(out)
 
@@ -66,9 +109,9 @@ class ResNet50(ResNet):
 
         raise ValueError
 
-    def get_fc(self):
+    def get_fc(self) -> tuple[np.ndarray, np.ndarray]:
         fc = self.fc
         return fc.weight.cpu().detach().numpy(), fc.bias.cpu().detach().numpy()
 
-    def get_fc_layer(self):
+    def get_fc_layer(self) -> nn.Linear:
         return self.fc

@@ -1,15 +1,19 @@
+from typing import cast
+
 from openood.datasets import get_dataloader, get_ood_dataloader
+from openood.evaluators.ad_evaluator import ADEvaluator
 from openood.evaluators.utils import get_evaluator
 from openood.networks.utils import get_network
 from openood.postprocessors import get_postprocessor
 from openood.utils import setup_logger
+from openood.utils.config import Config
 
 
 class TestAdPipeline:
-    def __init__(self, config) -> None:
+    def __init__(self, config: Config) -> None:
         self.config = config
 
-    def run(self):
+    def run(self) -> None:
         # generate output directory and save the full config file
         setup_logger(self.config)
 
@@ -19,15 +23,16 @@ class TestAdPipeline:
 
         # init network
         net = get_network(self.config.network)
-        
+
         # init evaluator
-        evaluator = get_evaluator(self.config)
+        evaluator = cast(ADEvaluator, get_evaluator(self.config))
 
         postprocessor = get_postprocessor(self.config)
         # setup for distance-based methods
         postprocessor.setup(net, id_loader_dict, ood_loader_dict)
 
-        print('Start testing...', flush=True)
-        test_metrics = evaluator.eval_ood(net, id_loader_dict, ood_loader_dict,
-                                          postprocessor)
+        print("Start testing...", flush=True)
+        test_metrics = evaluator.eval_ood(
+            net, id_loader_dict, ood_loader_dict, postprocessor
+        )
         evaluator.report(test_metrics)

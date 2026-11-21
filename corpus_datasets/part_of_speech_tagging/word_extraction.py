@@ -1,5 +1,4 @@
 import csv
-import pdb
 
 # 文件名
 input_file = "words_pos.csv"
@@ -22,12 +21,12 @@ with open(input_file, mode="r", encoding="utf-8") as file:
         pos_tag = row[2]  # 第三列是 POS 标签
         if pos_tag == "NN":  # 筛选 NN
             nn_words.append(word)
-        elif pos_tag == 'NNP':
+        elif pos_tag == "NNP":
             nnp_words.append(word)
         elif pos_tag == "JJ":  # 筛选 JJ
             jj_words.append(word)
 
-print('len of NN, NNP, JJ are', len(nn_words), len(nnp_words), len(jj_words))
+print("len of NN, NNP, JJ are", len(nn_words), len(nnp_words), len(jj_words))
 
 # 写入 NN 文件
 with open(nn_output_file, mode="w", encoding="utf-8") as file:

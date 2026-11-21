@@ -5,10 +5,11 @@ import sys
 
 import yaml
 
-import openood.utils.comm as comm
+from openood.utils import comm
+from openood.utils.config import Config
 
 
-def mkdir_if_missing(dirname):
+def mkdir_if_missing(dirname: str) -> None:
     """Create dirname if it is missing."""
     if not osp.exists(dirname):
         try:
@@ -34,92 +35,88 @@ class Logger:
        >>> log_name = 'train.log'
        >>> sys.stdout = Logger(osp.join(save_dir, log_name))
     """
-    def __init__(self, fpath=None):
+
+    def __init__(self, fpath: str | None = None) -> None:
         self.console = sys.stdout
         self.file = None
         if fpath is not None:
             mkdir_if_missing(osp.dirname(fpath))
-            self.file = open(fpath, 'w')
+            self.file = open(fpath, "w")
 
-    def __del__(self):
+    def __del__(self) -> None:
         self.close()
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         pass
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         self.close()
 
-    def write(self, msg):
+    def write(self, msg: str) -> None:
         self.console.write(msg)
         if self.file is not None:
             self.file.write(msg)
 
-    def flush(self):
+    def flush(self) -> None:
         self.console.flush()
         if self.file is not None:
             self.file.flush()
             os.fsync(self.file.fileno())
 
-    def close(self):
+    def close(self) -> None:
         self.console.close()
         if self.file is not None:
             self.file.close()
 
 
-def setup_logger(config):
+def setup_logger(config: Config) -> None:
     """generate exp directory to save configs, logger, checkpoints, etc.
 
     Args:
         config: all configs of the experiment
     """
-    print('------------------ Config --------------------------', flush=True)
+    print("------------------ Config --------------------------", flush=True)
     print(config, flush=True)
-    print(u'\u2500' * 70, flush=True)
+    print("\u2500" * 70, flush=True)
 
     output = config.output_dir
 
     if config.save_output and comm.is_main_process():
-        print('Output dir: {}'.format(output), flush=True)
+        print("Output dir: {}".format(output), flush=True)
         if osp.isdir(output):
-            if config.merge_option == 'default':
-                ans = input('Exp dir already exists, merge it? (y/n)')
-                if ans in ['yes', 'Yes', 'YES', 'y', 'Y', 'can']:
+            if config.merge_option == "default":
+                ans = input("Exp dir already exists, merge it? (y/n)")
+                if ans in ["yes", "Yes", "YES", "y", "Y", "can"]:
                     save_logger(config, output)
-                elif ans in ['no', 'No', 'NO', 'n', 'N']:
-                    print('Quitting the process...', flush=True)
+                elif ans in ["no", "No", "NO", "n", "N"]:
+                    print("Quitting the process...", flush=True)
                     quit()
                 else:
-                    raise ValueError('Unexpected Input.')
-            elif config.merge_option == 'merge':
+                    raise ValueError("Unexpected Input.")
+            elif config.merge_option == "merge":
                 save_logger(config, output)
-            elif config.merge_option == 'pass':
-                if os.path.exists(os.path.join(config.save_output, 'ood.csv')):
-                    print('Exp dir already exists, quitting the process...',
-                          flush=True)
+            elif config.merge_option == "pass":
+                if os.path.exists(os.path.join(config.save_output, "ood.csv")):
+                    print("Exp dir already exists, quitting the process...", flush=True)
                     quit()
                 else:
                     save_logger(config, output)
         else:
             save_logger(config, output)
     else:
-        print('No output directory.', flush=True)
+        print("No output directory.", flush=True)
 
     comm.synchronize()
 
 
-def save_logger(config, output):
-    print('Output directory path: {}'.format(output), flush=True)
+def save_logger(config: Config, output: str) -> None:
+    print("Output directory path: {}".format(output), flush=True)
     os.makedirs(output, exist_ok=True)
     # Save config
     # FIXME: saved config file is not beautified.
-    config_save_path = osp.join(output, 'config.yml')
-    with open(config_save_path, 'w') as f:
-        yaml.dump(config,
-                  f,
-                  default_flow_style=False,
-                  sort_keys=False,
-                  indent=2)
+    config_save_path = osp.join(output, "config.yml")
+    with open(config_save_path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False, indent=2)
     # save log file
-    fpath = osp.join(output, 'log.txt')
+    fpath = osp.join(output, "log.txt")
     sys.stdout = Logger(fpath)

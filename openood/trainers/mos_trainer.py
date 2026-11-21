@@ -1,20 +1,22 @@
+from collections.abc import Callable, Sequence
 from copy import deepcopy
+from typing import Literal, cast
 
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import openood.utils.comm as comm
-from openood.utils import Config
+from openood._typing import Metrics
+from openood.utils import Config, comm
 
 
-def get_mixup(dataset_size):
+def get_mixup(dataset_size: int) -> float:
     return 0.0 if dataset_size < 20_000 else 0.1
 
 
-def get_group_slices(classes_per_group):
+def get_group_slices(classes_per_group: Sequence[int] | np.ndarray) -> torch.Tensor:
     group_slices = []
     start = 0
     for num_cls in classes_per_group:
@@ -24,7 +26,7 @@ def get_group_slices(classes_per_group):
     return torch.LongTensor(group_slices)
 
 
-def get_schedule(dataset_size):
+def get_schedule(dataset_size: int) -> list[int]:
     if dataset_size < 20_000:
         return [100, 200, 300, 400, 500]
     elif dataset_size < 500_000:
@@ -33,7 +35,7 @@ def get_schedule(dataset_size):
         return [500, 6000, 12_000, 18_000, 20_000]
 
 
-def get_lr(step, dataset_size, base_lr=0.003):
+def get_lr(step: int, dataset_size: int, base_lr: float = 0.003) -> float | None:
     """Returns learning-rate for `step` or None at the end."""
     supports = get_schedule(dataset_size)
     # Linear warmup
@@ -50,7 +52,9 @@ def get_lr(step, dataset_size, base_lr=0.003):
         return base_lr
 
 
-def mixup_data(x, y, lam):
+def mixup_data(
+    x: torch.Tensor, y: torch.Tensor, lam: float
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Returns mixed inputs, pairs of targets, and lambda."""
     indices = torch.randperm(x.shape[0]).to(x.device)
 
@@ -59,17 +63,29 @@ def mixup_data(x, y, lam):
     return mixed_x, y_a, y_b
 
 
-def mixup_criterion_group(criterion, pred, y_a, y_b, lam, group_slices):
-    return lam * calc_group_softmax_loss(criterion, pred, y_a, group_slices) \
-           + (1 - lam) * calc_group_softmax_loss(criterion,
-                                               pred, y_b, group_slices)
+def mixup_criterion_group(
+    criterion: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    pred: torch.Tensor,
+    y_a: torch.Tensor,
+    y_b: torch.Tensor,
+    lam: float,
+    group_slices: torch.Tensor,
+) -> torch.Tensor | float:
+    return lam * calc_group_softmax_loss(criterion, pred, y_a, group_slices) + (
+        1 - lam
+    ) * calc_group_softmax_loss(criterion, pred, y_b, group_slices)
 
 
-def calc_group_softmax_loss(criterion, logits, labels, group_slices):
+def calc_group_softmax_loss(
+    criterion: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    group_slices: torch.Tensor,
+) -> torch.Tensor | Literal[0]:
     num_groups = group_slices.shape[0]
     loss = 0
     for i in range(num_groups):
-        group_logit = logits[:, group_slices[i][0]:group_slices[i][1]]
+        group_logit = logits[:, group_slices[i][0] : group_slices[i][1]]
         group_label = labels[:, i]
 
         loss += criterion(group_logit, group_label)
@@ -77,7 +93,9 @@ def calc_group_softmax_loss(criterion, logits, labels, group_slices):
     return loss
 
 
-def calc_group_softmax_acc(logits, labels, group_slices):
+def calc_group_softmax_acc(
+    logits: torch.Tensor, labels: torch.Tensor, group_slices: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
     num_groups = group_slices.shape[0]
     loss = 0
     num_samples = logits.shape[0]
@@ -85,10 +103,10 @@ def calc_group_softmax_acc(logits, labels, group_slices):
     all_group_max_score, all_group_max_class = [], []
 
     smax = torch.nn.Softmax(dim=-1).cuda()
-    cri = torch.nn.CrossEntropyLoss(reduction='none').cuda()
+    cri = torch.nn.CrossEntropyLoss(reduction="none").cuda()
 
     for i in range(num_groups):
-        group_logit = logits[:, group_slices[i][0]:group_slices[i][1]]
+        group_logit = logits[:, group_slices[i][0] : group_slices[i][1]]
         group_label = labels[:, i]
         loss += cri(group_logit, group_label)
 
@@ -105,22 +123,24 @@ def calc_group_softmax_acc(logits, labels, group_slices):
 
     final_max_score, max_group = torch.max(all_group_max_score, dim=1)
 
-    pred_cls_within_group = all_group_max_class[torch.arange(num_samples),
-                                                max_group]
+    pred_cls_within_group = all_group_max_class[torch.arange(num_samples), max_group]
 
     gt_class, gt_group = torch.max(labels, dim=1)
 
-    selected_groups = (max_group == gt_group)
+    selected_groups = max_group == gt_group
 
     pred_acc = torch.zeros(logits.shape[0]).bool().cuda()
 
     pred_acc[selected_groups] = (
-        pred_cls_within_group[selected_groups] == gt_class[selected_groups])
+        pred_cls_within_group[selected_groups] == gt_class[selected_groups]
+    )
 
-    return loss, pred_acc
+    return cast(torch.Tensor, loss), pred_acc
 
 
-def topk(output, target, ks=(1, )):
+def topk(
+    output: torch.Tensor, target: torch.Tensor, ks: Sequence[int] = (1,)
+) -> list[torch.Tensor]:
     """Returns one boolean vector for each k, whether the target is within the
     output's top-k."""
     _, pred = output.topk(max(ks), 1, True, True)
@@ -129,23 +149,30 @@ def topk(output, target, ks=(1, )):
     return [correct[:k].max(0)[0] for k in ks]
 
 
-def run_eval(model, data_loader, step, group_slices, num_group):
+def run_eval(
+    model: nn.Module,
+    data_loader: DataLoader,
+    step: int,
+    group_slices: torch.Tensor,
+    num_group: int,
+) -> tuple[list[float], list[bool]]:
     # switch to evaluate mode
     model.eval()
 
     all_c, all_top1 = [], []
 
     train_dataiter = iter(data_loader)
-    for train_step in tqdm(range(1,
-                                 len(train_dataiter) + 1),
-                           desc='Test : ',
-                           position=0,
-                           leave=True,
-                           disable=not comm.is_main_process()):
+    for train_step in tqdm(
+        range(1, len(train_dataiter) + 1),
+        desc="Test : ",
+        position=0,
+        leave=True,
+        disable=not comm.is_main_process(),
+    ):
         batch = next(train_dataiter)
-        data = batch['data'].cuda()
-        group_label = batch['group_label'].cuda()
-        class_label = batch['class_label'].cuda()
+        data = batch["data"].cuda()
+        group_label = batch["group_label"].cuda()
+        class_label = batch["class_label"].cuda()
         labels = []
         for i in range(len(group_label)):
             label = torch.zeros(num_group, dtype=torch.int64)
@@ -162,8 +189,8 @@ def run_eval(model, data_loader, step, group_slices, num_group):
             if group_slices is not None:
                 c, top1 = calc_group_softmax_acc(logits, y, group_slices)
             else:
-                c = torch.nn.CrossEntropyLoss(reduction='none')(logits, y)
-                top1 = topk(logits, y, ks=(1, ))[0]
+                c = torch.nn.CrossEntropyLoss(reduction="none")(logits, y)
+                top1 = topk(logits, y, ks=(1,))[0]
 
             all_c.extend(c.cpu())  # Also ensures a sync point.
             all_top1.extend(top1.cpu())
@@ -178,8 +205,9 @@ def run_eval(model, data_loader, step, group_slices, num_group):
 
 
 class MOSTrainer:
-    def __init__(self, net: nn.Module, train_loader: DataLoader,
-                 config: Config) -> None:
+    def __init__(
+        self, net: nn.Module, train_loader: DataLoader, config: Config
+    ) -> None:
 
         self.net = net.cuda()
         self.train_loader = train_loader
@@ -187,28 +215,23 @@ class MOSTrainer:
         self.lr = config.optimizer.lr
 
         trainable_params = filter(lambda p: p.requires_grad, net.parameters())
-        self.optim = torch.optim.SGD(trainable_params,
-                                     lr=self.lr,
-                                     momentum=0.9)
+        self.optim = torch.optim.SGD(trainable_params, lr=self.lr, momentum=0.9)
         self.optim.zero_grad()
         self.net.train()
 
         # train_set len
-        self.train_set_len = config.dataset.train.batch_size * len(
-            train_loader)
+        self.train_set_len = config.dataset.train.batch_size * len(train_loader)
         self.mixup = get_mixup(self.train_set_len)
         self.cri = torch.nn.CrossEntropyLoss().cuda()
 
         self.accum_steps = 0
-        self.mixup_l = np.random.beta(self.mixup,
-                                      self.mixup) if self.mixup > 0 else 1
+        self.mixup_l = np.random.beta(self.mixup, self.mixup) if self.mixup > 0 else 1
 
         # if specified group_config
-        if (config.trainer.group_config.endswith('npy')):
+        if config.trainer.group_config.endswith("npy"):
             self.classes_per_group = np.load(config.trainer.group_config)
-        elif (config.trainer.group_config.endswith('txt')):
-            self.classes_per_group = np.loadtxt(config.trainer.group_config,
-                                                dtype=int)
+        elif config.trainer.group_config.endswith("txt"):
+            self.classes_per_group = np.loadtxt(config.trainer.group_config, dtype=int)
         else:
             self.cal_group_slices(self.train_loader)
 
@@ -219,19 +242,20 @@ class MOSTrainer:
         self.step = 0
         self.batch_split = 1
 
-    def cal_group_slices(self, train_loader):
+    def cal_group_slices(self, train_loader: DataLoader) -> None:
         # cal group config
         group = {}
         train_dataiter = iter(self.train_loader)
-        for train_step in tqdm(range(1,
-                                     len(train_dataiter) + 1),
-                               desc='cal group_config',
-                               position=0,
-                               leave=True,
-                               disable=not comm.is_main_process()):
+        for train_step in tqdm(
+            range(1, len(train_dataiter) + 1),
+            desc="cal group_config",
+            position=0,
+            leave=True,
+            disable=not comm.is_main_process(),
+        ):
             batch = next(train_dataiter)
-            group_label = deepcopy(batch['group_label'])
-            class_label = deepcopy(batch['class_label'])
+            group_label = deepcopy(batch["group_label"])
+            class_label = deepcopy(batch["class_label"])
 
             for i in range(len(class_label)):
                 gl = group_label[i].item()
@@ -249,20 +273,23 @@ class MOSTrainer:
         for i in range(len(group)):
             self.classes_per_group.append(max(group[str(i)]) + 1)
 
-    def train_epoch(self, epoch_idx):
+    def train_epoch(
+        self, epoch_idx: int
+    ) -> tuple[nn.Module, Metrics, int, torch.Tensor]:
         total_loss = 0
 
         train_dataiter = iter(self.train_loader)
-        for train_step in tqdm(range(1,
-                                     len(train_dataiter) + 1),
-                               desc='Epoch {:03d}: '.format(epoch_idx),
-                               position=0,
-                               leave=True,
-                               disable=not comm.is_main_process()):
+        for train_step in tqdm(
+            range(1, len(train_dataiter) + 1),
+            desc="Epoch {:03d}: ".format(epoch_idx),
+            position=0,
+            leave=True,
+            disable=not comm.is_main_process(),
+        ):
             batch = next(train_dataiter)
-            data = batch['data'].cuda()
-            group_label = batch['group_label'].cuda()
-            class_label = batch['class_label'].cuda()
+            data = batch["data"].cuda()
+            group_label = batch["group_label"].cuda()
+            class_label = batch["class_label"].cuda()
 
             labels = []
             for i in range(len(group_label)):
@@ -276,7 +303,7 @@ class MOSTrainer:
             if lr is None:
                 break
             for param_group in self.optim.param_groups:
-                param_group['lr'] = lr
+                param_group["lr"] = lr
 
             if self.mixup > 0.0:
                 x, y_a, y_b = mixup_data(data, labels, self.mixup_l)
@@ -286,11 +313,11 @@ class MOSTrainer:
             y_a = y_a.cuda()
             y_b = y_b.cuda()
             if self.mixup > 0.0:
-                c = mixup_criterion_group(self.cri, logits, y_a, y_b,
-                                          self.mixup_l, self.group_slices)
+                c = mixup_criterion_group(
+                    self.cri, logits, y_a, y_b, self.mixup_l, self.group_slices
+                )
             else:
-                c = calc_group_softmax_loss(self.cri, logits, labels,
-                                            self.group_slices)
+                c = calc_group_softmax_loss(self.cri, logits, labels, self.group_slices)
 
             c_num = float(c.data.cpu().numpy())  # Also ensures a sync point.
             #  # Accumulate grads
@@ -312,8 +339,9 @@ class MOSTrainer:
             self.step += 1
             self.accum_steps = 0
             # Sample new mixup ratio for next batch
-            self.mixup_l = np.random.beta(self.mixup,
-                                          self.mixup) if self.mixup > 0 else 1
+            self.mixup_l = (
+                np.random.beta(self.mixup, self.mixup) if self.mixup > 0 else 1
+            )
 
         # torch.save(self.net.state_dict(),
         #            os.path.join(self.config.output_dir, 'mos_epoch_latest.ckpt'))
@@ -323,9 +351,9 @@ class MOSTrainer:
 
         loss_avg = total_loss / len(train_dataiter)
 
-        metrics = {}
-        metrics['epoch_idx'] = epoch_idx
-        metrics['loss'] = loss_avg
+        metrics: Metrics = {}
+        metrics["epoch_idx"] = epoch_idx
+        metrics["loss"] = loss_avg
         # metrics['acc'] = np.mean(all_top1) # the acc used in there is the top1 acc
 
         return self.net, metrics, self.num_group, self.group_slices

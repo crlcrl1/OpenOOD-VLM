@@ -1,13 +1,17 @@
+from typing import Any
+
 import numpy as np
 import torch
 import torchvision.transforms as tvs_trans
+from PIL import Image
 
 from openood.utils.config import Config
+
 from .transform import Convert, interpolation_modes, normalization_dict
 
 
-class CutoutPreprocessor():
-    def __init__(self, config: Config):
+class CutoutPreprocessor:
+    def __init__(self, config: Config) -> None:
         self.pre_size = config.dataset.pre_size
         self.image_size = config.dataset.image_size
         self.interpolation = interpolation_modes[config.dataset.interpolation]
@@ -22,43 +26,48 @@ class CutoutPreprocessor():
         self.n_holes = config.preprocessor.n_holes
         self.length = config.preprocessor.length
 
-        if 'imagenet' in config.dataset.name:
-            self.transform = tvs_trans.Compose([
-                tvs_trans.RandomResizedCrop(self.image_size,
-                                            interpolation=self.interpolation),
-                tvs_trans.RandomHorizontalFlip(0.5),
-                tvs_trans.ToTensor(),
-                tvs_trans.Normalize(mean=self.mean, std=self.std),
-                Cutout(n_holes=self.n_holes, length=self.length)
-            ])
-        elif 'aircraft' in config.dataset.name or 'cub' in config.dataset.name:
-            self.transform = tvs_trans.Compose([
-                tvs_trans.Resize(self.pre_size,
-                                 interpolation=self.interpolation),
-                tvs_trans.RandomCrop(self.image_size),
-                tvs_trans.RandomHorizontalFlip(),
-                tvs_trans.ColorJitter(brightness=32. / 255., saturation=0.5),
-                tvs_trans.ToTensor(),
-                tvs_trans.Normalize(mean=self.mean, std=self.std),
-                Cutout(n_holes=self.n_holes, length=self.length)
-            ])
+        if "imagenet" in config.dataset.name:
+            self.transform = tvs_trans.Compose(
+                [
+                    tvs_trans.RandomResizedCrop(
+                        self.image_size, interpolation=self.interpolation
+                    ),
+                    tvs_trans.RandomHorizontalFlip(0.5),
+                    tvs_trans.ToTensor(),
+                    tvs_trans.Normalize(mean=self.mean, std=self.std),
+                    Cutout(n_holes=self.n_holes, length=self.length),
+                ]
+            )
+        elif "aircraft" in config.dataset.name or "cub" in config.dataset.name:
+            self.transform = tvs_trans.Compose(
+                [
+                    tvs_trans.Resize(self.pre_size, interpolation=self.interpolation),
+                    tvs_trans.RandomCrop(self.image_size),
+                    tvs_trans.RandomHorizontalFlip(),
+                    tvs_trans.ColorJitter(brightness=32.0 / 255.0, saturation=0.5),
+                    tvs_trans.ToTensor(),
+                    tvs_trans.Normalize(mean=self.mean, std=self.std),
+                    Cutout(n_holes=self.n_holes, length=self.length),
+                ]
+            )
         else:
-            self.transform = tvs_trans.Compose([
-                Convert('RGB'),
-                tvs_trans.Resize(self.pre_size,
-                                 interpolation=self.interpolation),
-                tvs_trans.CenterCrop(self.image_size),
-                tvs_trans.RandomHorizontalFlip(),
-                tvs_trans.RandomCrop(self.image_size, padding=4),
-                tvs_trans.ToTensor(),
-                tvs_trans.Normalize(mean=self.mean, std=self.std),
-                Cutout(n_holes=self.n_holes, length=self.length)
-            ])
+            self.transform = tvs_trans.Compose(
+                [
+                    Convert("RGB"),
+                    tvs_trans.Resize(self.pre_size, interpolation=self.interpolation),
+                    tvs_trans.CenterCrop(self.image_size),
+                    tvs_trans.RandomHorizontalFlip(),
+                    tvs_trans.RandomCrop(self.image_size, padding=4),
+                    tvs_trans.ToTensor(),
+                    tvs_trans.Normalize(mean=self.mean, std=self.std),
+                    Cutout(n_holes=self.n_holes, length=self.length),
+                ]
+            )
 
-    def setup(self, **kwargs):
+    def setup(self, **kwargs: Any) -> None:
         pass
 
-    def __call__(self, image):
+    def __call__(self, image: Image.Image) -> torch.Tensor:
         return self.transform(image)
 
 
@@ -69,11 +78,12 @@ class Cutout(object):
         n_holes (int): Number of patches to cut out of each image.
         length (int): The length (in pixels) of each square patch.
     """
-    def __init__(self, n_holes, length):
+
+    def __init__(self, n_holes: int, length: int) -> None:
         self.n_holes = n_holes
         self.length = length
 
-    def __call__(self, img):
+    def __call__(self, img: torch.Tensor) -> torch.Tensor:
         """
         Args:
             img (Tensor): Tensor image of size (C, H, W).
@@ -95,7 +105,7 @@ class Cutout(object):
             x1 = np.clip(x - self.length // 2, 0, w)
             x2 = np.clip(x + self.length // 2, 0, w)
 
-            mask[y1:y2, x1:x2] = 0.
+            mask[y1:y2, x1:x2] = 0.0
 
         mask = torch.from_numpy(mask)
         mask = mask.expand_as(img)

@@ -2,12 +2,14 @@ import numpy as np
 from sklearn import metrics
 
 
-def compute_all_metrics(conf, label, pred):
+def compute_all_metrics(
+    conf: np.ndarray, label: np.ndarray, pred: np.ndarray
+) -> list[float]:
     np.set_printoptions(precision=3)
     recall = 0.95
     auroc, aupr_in, aupr_out, fpr = auc_and_fpr_recall(conf, label, recall)
 
-    accuracy = acc(pred, label) # only calculate the in-domain accuracy.
+    accuracy = acc(pred, label)  # only calculate the in-domain accuracy.
 
     results = [fpr, auroc, aupr_in, aupr_out, accuracy]
 
@@ -15,7 +17,7 @@ def compute_all_metrics(conf, label, pred):
 
 
 # accuracy
-def acc(pred, label):
+def acc(pred: np.ndarray, label: np.ndarray) -> float:
     ind_pred = pred[label != -1]
     ind_label = label[label != -1]
 
@@ -26,7 +28,7 @@ def acc(pred, label):
 
 
 # fpr_recall
-def fpr_recall(conf, label, tpr):
+def fpr_recall(conf: np.ndarray, label: np.ndarray, tpr: float) -> tuple[float, float]:
     gt = np.ones_like(label)
     gt[label == -1] = 0
 
@@ -37,7 +39,9 @@ def fpr_recall(conf, label, tpr):
 
 
 # auc
-def auc_and_fpr_recall(conf, label, tpr_th):
+def auc_and_fpr_recall(
+    conf: np.ndarray, label: np.ndarray, tpr_th: float
+) -> tuple[float, float, float, float]:
     # following convention in ML we treat OOD as positive
     ood_indicator = np.zeros_like(label)
     ood_indicator[label == -1] = 1
@@ -48,11 +52,13 @@ def auc_and_fpr_recall(conf, label, tpr_th):
     fpr_list, tpr_list, thresholds = metrics.roc_curve(ood_indicator, -conf)
     fpr = fpr_list[np.argmax(tpr_list >= tpr_th)]
 
-    precision_in, recall_in, thresholds_in \
-        = metrics.precision_recall_curve(1 - ood_indicator, conf)
+    precision_in, recall_in, thresholds_in = metrics.precision_recall_curve(
+        1 - ood_indicator, conf
+    )
 
-    precision_out, recall_out, thresholds_out \
-        = metrics.precision_recall_curve(ood_indicator, -conf)
+    precision_out, recall_out, thresholds_out = metrics.precision_recall_curve(
+        ood_indicator, -conf
+    )
 
     auroc = metrics.auc(fpr_list, tpr_list)
     aupr_in = metrics.auc(recall_in, precision_in)
@@ -62,7 +68,7 @@ def auc_and_fpr_recall(conf, label, tpr_th):
 
 
 # ccr_fpr
-def ccr_fpr(conf, fpr, pred, label):
+def ccr_fpr(conf: np.ndarray, fpr: float, pred: np.ndarray, label: np.ndarray) -> float:
     ind_conf = conf[label != -1]
     ind_pred = pred[label != -1]
     ind_label = label[label != -1]
@@ -80,10 +86,12 @@ def ccr_fpr(conf, fpr, pred, label):
     return ccr
 
 
-def detection(ind_confidences,
-              ood_confidences,
-              n_iter=100000,
-              return_data=False):
+def detection(
+    ind_confidences: np.ndarray,
+    ood_confidences: np.ndarray,
+    n_iter: int = 100000,
+    return_data: bool = False,
+) -> tuple[float, float | None] | tuple[float, float | None, list[float], list[float]]:
     # calculate the minimum detection error
     Y1 = ood_confidences
     X1 = ind_confidences

@@ -1,16 +1,17 @@
+import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 class DINOv2Wrapper(nn.Module):
-    def __init__(self, model):
+    def __init__(self, model: nn.Module) -> None:
         super().__init__()
         self.model = model
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
 
-    def forward_threshold(self, x, threshold):
+    def forward_threshold(self, x: torch.Tensor, threshold: float) -> torch.Tensor:
         # Reshape and permute the input tensor
         x = self._process_input(x)
         n = x.shape[0]
@@ -29,9 +30,9 @@ class DINOv2Wrapper(nn.Module):
 
         return logits_cls
 
-    def get_fc(self):
+    def get_fc(self) -> tuple[np.ndarray, np.ndarray]:
         fc = self.heads[0]
         return fc.weight.cpu().detach().numpy(), fc.bias.cpu().detach().numpy()
 
-    def get_fc_layer(self):
+    def get_fc_layer(self) -> nn.Linear:
         return self.heads[0]

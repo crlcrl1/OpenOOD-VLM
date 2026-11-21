@@ -1,14 +1,14 @@
-from typing import Any
-
 import torch
-import torch.nn as nn
+from torch import nn
+
+from openood.preprocessors.transform import normalization_dict
+from openood.utils.config import Config
 
 from .base_postprocessor import BasePostprocessor
-from openood.preprocessors.transform import normalization_dict
 
 
 class GodinPostprocessor(BasePostprocessor):
-    def __init__(self, config):
+    def __init__(self, config: Config) -> None:
         super(GodinPostprocessor, self).__init__(config)
         self.args = self.config.postprocessor.postprocessor_args
 
@@ -19,7 +19,9 @@ class GodinPostprocessor(BasePostprocessor):
         except KeyError:
             self.input_std = [0.5, 0.5, 0.5]
 
-    def postprocess(self, net: nn.Module, data: Any):
+    def postprocess(
+        self, net: nn.Module, data: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         data.requires_grad = True
         output = net(data, inference=True)
 
@@ -38,9 +40,7 @@ class GodinPostprocessor(BasePostprocessor):
         gradient[:, 2] = (gradient[:, 2]) / self.input_std[2]
 
         # Adding small perturbations to images
-        tempInputs = torch.add(data.detach(),
-                               gradient,
-                               alpha=self.noise_magnitude)
+        tempInputs = torch.add(data.detach(), gradient, alpha=self.noise_magnitude)
 
         # calculate score
         output = net(tempInputs, inference=True, score_func=self.score_func)

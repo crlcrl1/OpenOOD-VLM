@@ -1,16 +1,23 @@
+from collections.abc import Sequence
+from typing import Any
+
 import libmr
 import numpy as np
 import scipy.spatial.distance as spd
 import torch
-import torch.nn as nn
+from torch import nn
+from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+from openood._typing import LoaderDict, OODLoaders
+from openood.utils.config import Config
 
 from .base_postprocessor import BasePostprocessor
 from .info import num_classes_dict
 
 
 class OpenMax(BasePostprocessor):
-    def __init__(self, config):
+    def __init__(self, config: Config) -> None:
         super(OpenMax, self).__init__(config)
         self.nc = num_classes_dict[config.dataset.name]
         self.weibull_alpha = 3
@@ -18,21 +25,27 @@ class OpenMax(BasePostprocessor):
         self.weibull_tail = 20
         self.setup_flag = False
 
-    def setup(self, net: nn.Module, id_loader_dict, ood_loder_dict):
+    def setup(
+        self, net: nn.Module, id_loader_dict: LoaderDict, ood_loder_dict: OODLoaders
+    ) -> None:
         if not self.setup_flag:
             # Fit the weibull distribution from training data.
-            print('Fittting Weibull distribution...')
+            print("Fittting Weibull distribution...")
             _, mavs, dists = compute_train_score_and_mavs_and_dists(
-                self.nc, id_loader_dict['train'], device='cuda', net=net)
+                self.nc, id_loader_dict["train"], device="cuda", net=net
+            )
             categories = list(range(0, self.nc))
-            self.weibull_model = fit_weibull(mavs, dists, categories,
-                                             self.weibull_tail, 'euclidean')
+            self.weibull_model = fit_weibull(
+                mavs, dists, categories, self.weibull_tail, "euclidean"
+            )
             self.setup_flag = True
         else:
             pass
 
     @torch.no_grad()
-    def postprocess(self, net: nn.Module, data):
+    def postprocess(
+        self, net: nn.Module, data: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         net.eval()
         scores = net(data).cpu().numpy()
         scores = np.array(scores)[:, np.newaxis, :]
@@ -41,12 +54,17 @@ class OpenMax(BasePostprocessor):
         pred_openmax = []
         score_openmax = []
         for score in scores:
-            so, _ = openmax(self.weibull_model, categories, score, 0.5,
-                            self.weibull_alpha,
-                            'euclidean')  # openmax_prob, softmax_prob
+            so, _ = openmax(
+                self.weibull_model,
+                categories,
+                score,
+                0.5,
+                self.weibull_alpha,
+                "euclidean",
+            )  # openmax_prob, softmax_prob
             pred_openmax.append(
-                np.argmax(so) if np.max(so) >= self.weibull_threshold else (
-                    self.nc - 1))
+                np.argmax(so) if np.max(so) >= self.weibull_threshold else (self.nc - 1)
+            )
 
             score_openmax.append(so)
 
@@ -56,7 +74,9 @@ class OpenMax(BasePostprocessor):
         return pred, conf
 
 
-def compute_channel_distances(mavs, features, eu_weight=0.5):
+def compute_channel_distances(
+    mavs: np.ndarray, features: np.ndarray, eu_weight: float = 0.5
+) -> dict[str, np.ndarray]:
     """
     Input:
         mavs (channel, C)
@@ -67,53 +87,59 @@ def compute_channel_distances(mavs, features, eu_weight=0.5):
     """
     eucos_dists, eu_dists, cos_dists = [], [], []
     for channel, mcv in enumerate(mavs):  # Compute channel specific distances
-        eu_dists.append(
-            [spd.euclidean(mcv, feat[channel]) for feat in features])
+        eu_dists.append([spd.euclidean(mcv, feat[channel]) for feat in features])
         cos_dists.append([spd.cosine(mcv, feat[channel]) for feat in features])
-        eucos_dists.append([
-            spd.euclidean(mcv, feat[channel]) * eu_weight +
-            spd.cosine(mcv, feat[channel]) for feat in features
-        ])
+        eucos_dists.append(
+            [
+                spd.euclidean(mcv, feat[channel]) * eu_weight
+                + spd.cosine(mcv, feat[channel])
+                for feat in features
+            ]
+        )
 
     return {
-        'eucos': np.array(eucos_dists),
-        'cosine': np.array(cos_dists),
-        'euclidean': np.array(eu_dists)
+        "eucos": np.array(eucos_dists),
+        "cosine": np.array(cos_dists),
+        "euclidean": np.array(eu_dists),
     }
 
 
-def compute_train_score_and_mavs_and_dists(train_class_num, trainloader,
-                                           device, net):
+def compute_train_score_and_mavs_and_dists(
+    train_class_num: int,
+    trainloader: DataLoader,
+    device: str | torch.device,
+    net: nn.Module,
+) -> tuple[list[np.ndarray], np.ndarray, list[dict[str, np.ndarray]]]:
     scores = [[] for _ in range(train_class_num)]
 
     train_dataiter = iter(trainloader)
     with torch.no_grad():
-        for train_step in tqdm(range(1,
-                                     len(train_dataiter) + 1),
-                               desc='Progress: ',
-                               position=0,
-                               leave=True):
+        for train_step in tqdm(
+            range(1, len(train_dataiter) + 1), desc="Progress: ", position=0, leave=True
+        ):
             batch = next(train_dataiter)
-            data = batch['data'].cuda()
-            target = batch['label'].cuda()
+            data = batch["data"].cuda()
+            target = batch["label"].cuda()
 
             # this must cause error for cifar
             outputs = net(data)
             for score, t in zip(outputs, target):
-
                 if torch.argmax(score) == t:
                     scores[t].append(score.unsqueeze(dim=0).unsqueeze(dim=0))
 
     scores = [torch.cat(x).cpu().numpy() for x in scores]  # (N_c, 1, C) * C
     mavs = np.array([np.mean(x, axis=0) for x in scores])  # (C, 1, C)
-    dists = [
-        compute_channel_distances(mcv, score)
-        for mcv, score in zip(mavs, scores)
-    ]
+    dists = [compute_channel_distances(mcv, score) for mcv, score in zip(mavs, scores)]
     return scores, mavs, dists
 
 
-def fit_weibull(means, dists, categories, tailsize=20, distance_type='eucos'):
+def fit_weibull(
+    means: np.ndarray,
+    dists: list[dict[str, np.ndarray]],
+    categories: Sequence[int],
+    tailsize: int = 20,
+    distance_type: str = "eucos",
+) -> dict[int, dict[str, Any]]:
     """
     Input:
         means (C, channel, C)
@@ -126,20 +152,21 @@ def fit_weibull(means, dists, categories, tailsize=20, distance_type='eucos'):
     weibull_model = {}
     for mean, dist, category_name in zip(means, dists, categories):
         weibull_model[category_name] = {}
-        weibull_model[category_name]['distances_{}'.format(
-            distance_type)] = dist[distance_type]
-        weibull_model[category_name]['mean_vec'] = mean
-        weibull_model[category_name]['weibull_model'] = []
+        weibull_model[category_name]["distances_{}".format(distance_type)] = dist[
+            distance_type
+        ]
+        weibull_model[category_name]["mean_vec"] = mean
+        weibull_model[category_name]["weibull_model"] = []
         for channel in range(mean.shape[0]):
             mr = libmr.MR()
             tailtofit = np.sort(dist[distance_type][channel, :])[-tailsize:]
             mr.fit_high(tailtofit, len(tailtofit))
-            weibull_model[category_name]['weibull_model'].append(mr)
+            weibull_model[category_name]["weibull_model"].append(mr)
 
     return weibull_model
 
 
-def compute_openmax_prob(scores, scores_u):
+def compute_openmax_prob(scores: np.ndarray, scores_u: np.ndarray) -> list[float]:
     prob_scores, prob_unknowns = [], []
     for s, su in zip(scores, scores_u):
         channel_scores = np.exp(s)
@@ -156,39 +183,53 @@ def compute_openmax_prob(scores, scores_u):
     return modified_scores
 
 
-def query_weibull(category_name, weibull_model, distance_type='eucos'):
+def query_weibull(
+    category_name: int,
+    weibull_model: dict[int, dict[str, Any]],
+    distance_type: str = "eucos",
+) -> list[Any]:
     return [
-        weibull_model[category_name]['mean_vec'],
-        weibull_model[category_name]['distances_{}'.format(distance_type)],
-        weibull_model[category_name]['weibull_model']
+        weibull_model[category_name]["mean_vec"],
+        weibull_model[category_name]["distances_{}".format(distance_type)],
+        weibull_model[category_name]["weibull_model"],
     ]
 
 
-def calc_distance(query_score, mcv, eu_weight, distance_type='eucos'):
-    if distance_type == 'eucos':
-        query_distance = spd.euclidean(mcv, query_score) * eu_weight + \
-            spd.cosine(mcv, query_score)
-    elif distance_type == 'euclidean':
+def calc_distance(
+    query_score: np.ndarray,
+    mcv: np.ndarray,
+    eu_weight: float,
+    distance_type: str = "eucos",
+) -> float:
+    if distance_type == "eucos":
+        query_distance = spd.euclidean(mcv, query_score) * eu_weight + spd.cosine(
+            mcv, query_score
+        )
+    elif distance_type == "euclidean":
         query_distance = spd.euclidean(mcv, query_score)
-    elif distance_type == 'cosine':
+    elif distance_type == "cosine":
         query_distance = spd.cosine(mcv, query_score)
     else:
-        print('distance type not known: enter either of eucos, \
-               euclidean or cosine')
+        print(
+            "distance type not known: enter either of eucos, \
+               euclidean or cosine"
+        )
     return query_distance
 
 
-def softmax(x):
+def softmax(x: np.ndarray) -> np.ndarray:
     e_x = np.exp(x - np.max(x))
     return e_x / e_x.sum()
 
 
-def openmax(weibull_model,
-            categories,
-            input_score,
-            eu_weight,
-            alpha=10,
-            distance_type='eucos'):
+def openmax(
+    weibull_model: dict[int, dict[str, Any]],
+    categories: Sequence[int],
+    input_score: np.ndarray,
+    eu_weight: float,
+    alpha: int = 10,
+    distance_type: str = "eucos",
+) -> tuple[np.ndarray, np.ndarray]:
     """Re-calibrate scores via OpenMax layer
     Output:
         openmax probability and softmax probability
@@ -196,8 +237,7 @@ def openmax(weibull_model,
     nb_classes = len(categories)
 
     ranked_list = input_score.argsort().ravel()[::-1][:alpha]
-    alpha_weights = [((alpha + 1) - i) / float(alpha)
-                     for i in range(1, alpha + 1)]
+    alpha_weights = [((alpha + 1) - i) / float(alpha) for i in range(1, alpha + 1)]
     omega = np.zeros(nb_classes)
     omega[ranked_list] = alpha_weights
 
@@ -205,10 +245,12 @@ def openmax(weibull_model,
     for channel, input_score_channel in enumerate(input_score):
         score_channel, score_channel_u = [], []
         for c, category_name in enumerate(categories):
-            mav, dist, model = query_weibull(category_name, weibull_model,
-                                             distance_type)
-            channel_dist = calc_distance(input_score_channel, mav[channel],
-                                         eu_weight, distance_type)
+            mav, dist, model = query_weibull(
+                category_name, weibull_model, distance_type
+            )
+            channel_dist = calc_distance(
+                input_score_channel, mav[channel], eu_weight, distance_type
+            )
             wscore = model[channel].w_score(channel_dist)
             modified_score = input_score_channel[c] * (1 - wscore * omega[c])
             score_channel.append(modified_score)

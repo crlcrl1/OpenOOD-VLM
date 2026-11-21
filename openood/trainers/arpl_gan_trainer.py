@@ -1,34 +1,36 @@
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from openood._typing import Metrics
 from openood.utils import Config
 
 from .lr_scheduler import cosine_annealing
 
 
 class ARPLGANTrainer:
-    def __init__(self, net: dict, train_loader: DataLoader,
-                 config: Config) -> None:
+    def __init__(
+        self, net: dict[str, nn.Module], train_loader: DataLoader, config: Config
+    ) -> None:
 
-        self.net = net['netF']
-        self.netG = net['netG']
-        self.netD = net['netD']
+        self.net = net["netF"]
+        self.netG = net["netG"]
+        self.netD = net["netD"]
         self.train_loader = train_loader
         self.config = config
-        self.criterion = net['criterion']
+        self.criterion = net["criterion"]
 
-        self.fixed_noise = torch.FloatTensor(64, config.network.nz, 1,
-                                             1).normal_(0, 1).cuda()
+        self.fixed_noise = (
+            torch.FloatTensor(64, config.network.nz, 1, 1).normal_(0, 1).cuda()
+        )
         self.criterionD = nn.BCELoss()
 
-        params_list = [{
-            'params': self.net.parameters()
-        }, {
-            'params': self.criterion.parameters()
-        }]
+        params_list = [
+            {"params": self.net.parameters()},
+            {"params": self.criterion.parameters()},
+        ]
 
         self.optimizer = torch.optim.SGD(
             params_list,
@@ -48,14 +50,14 @@ class ARPLGANTrainer:
             ),
         )
 
-        self.optimizerD = torch.optim.Adam(self.netD.parameters(),
-                                           lr=config.optimizer.gan_lr,
-                                           betas=(0.5, 0.999))
-        self.optimizerG = torch.optim.Adam(self.netG.parameters(),
-                                           lr=config.optimizer.gan_lr,
-                                           betas=(0.5, 0.999))
+        self.optimizerD = torch.optim.Adam(
+            self.netD.parameters(), lr=config.optimizer.gan_lr, betas=(0.5, 0.999)
+        )
+        self.optimizerG = torch.optim.Adam(
+            self.netG.parameters(), lr=config.optimizer.gan_lr, betas=(0.5, 0.999)
+        )
 
-    def train_epoch(self, epoch_idx):
+    def train_epoch(self, epoch_idx: int) -> tuple[dict[str, nn.Module], Metrics]:
         self.net.train()
         self.netD.train()
         self.netG.train()
@@ -64,19 +66,27 @@ class ARPLGANTrainer:
         train_dataiter = iter(self.train_loader)
 
         real_label, fake_label = 1, 0
-        for train_step in tqdm(range(1,
-                                     len(train_dataiter) + 1),
-                               desc='Epoch {:03d}: '.format(epoch_idx),
-                               position=0,
-                               leave=True):
+        for train_step in tqdm(
+            range(1, len(train_dataiter) + 1),
+            desc="Epoch {:03d}: ".format(epoch_idx),
+            position=0,
+            leave=True,
+        ):
             batch = next(train_dataiter)
-            data = batch['data'].cuda()
-            target = batch['label'].cuda()
+            data = batch["data"].cuda()
+            target = batch["label"].cuda()
             gan_target = torch.FloatTensor(target.size()).fill_(0).cuda()
 
-            noise = torch.FloatTensor(
-                data.size(0), self.config.network.nz, self.config.network.ns,
-                self.config.network.ns).normal_(0, 1).cuda()
+            noise = (
+                torch.FloatTensor(
+                    data.size(0),
+                    self.config.network.nz,
+                    self.config.network.ns,
+                    self.config.network.ns,
+                )
+                .normal_(0, 1)
+                .cuda()
+            )
             noise = noise.cuda()
             noise = Variable(noise)
             fake = self.netG(noise)
@@ -111,8 +121,8 @@ class ARPLGANTrainer:
 
             # minimize the true distribution
             _, feat = self.net(
-                fake, True,
-                1 * torch.ones(data.shape[0], dtype=torch.long).cuda())
+                fake, True, 1 * torch.ones(data.shape[0], dtype=torch.long).cuda()
+            )
             errG_F = self.criterion.fake_loss(feat).mean()
             generator_loss = errG + self.config.loss.beta * errG_F
             generator_loss.backward()
@@ -124,19 +134,26 @@ class ARPLGANTrainer:
             # cross entropy loss
             self.optimizer.zero_grad()
             _, feat = self.net(
-                data, True,
-                0 * torch.ones(data.shape[0], dtype=torch.long).cuda())
+                data, True, 0 * torch.ones(data.shape[0], dtype=torch.long).cuda()
+            )
             _, loss = self.criterion(feat, target)
 
             # KL divergence
-            noise = torch.FloatTensor(
-                data.size(0), self.config.network.nz, self.config.network.ns,
-                self.config.network.ns).normal_(0, 1).cuda()
+            noise = (
+                torch.FloatTensor(
+                    data.size(0),
+                    self.config.network.nz,
+                    self.config.network.ns,
+                    self.config.network.ns,
+                )
+                .normal_(0, 1)
+                .cuda()
+            )
             noise = Variable(noise)
             fake = self.netG(noise)
             _, feat = self.net(
-                fake, True,
-                1 * torch.ones(data.shape[0], dtype=torch.long).cuda())
+                fake, True, 1 * torch.ones(data.shape[0], dtype=torch.long).cuda()
+            )
             F_loss_fake = self.criterion.fake_loss(feat).mean()
             total_loss = loss + self.config.loss.beta * F_loss_fake
             total_loss.backward()
@@ -150,15 +167,15 @@ class ARPLGANTrainer:
                 lossG_avg = lossG_avg * 0.8 + float(generator_loss) * 0.2
                 lossD_avg = lossD_avg * 0.8 + float(errD) * 0.2
 
-        metrics = {}
-        metrics['epoch_idx'] = epoch_idx
-        metrics['loss'] = loss_avg
-        metrics['lossG'] = lossG_avg
-        metrics['lossD'] = lossD_avg
+        metrics: Metrics = {}
+        metrics["epoch_idx"] = epoch_idx
+        metrics["loss"] = loss_avg
+        metrics["lossG"] = lossG_avg
+        metrics["lossD"] = lossD_avg
 
         return {
-            'netG': self.netG,
-            'netD': self.netD,
-            'netF': self.net,
-            'criterion': self.criterion
+            "netG": self.netG,
+            "netD": self.netD,
+            "netF": self.net,
+            "criterion": self.criterion,
         }, metrics

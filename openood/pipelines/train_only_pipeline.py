@@ -3,13 +3,14 @@ from openood.networks import get_network
 from openood.recorders import get_recorder
 from openood.trainers import get_trainer
 from openood.utils import setup_logger
+from openood.utils.config import Config
 
 
 class TrainOpenGanPipeline:
-    def __init__(self, config) -> None:
+    def __init__(self, config: Config) -> None:
         self.config = config
 
-    def run(self):
+    def run(self) -> None:
         # generate output directory and save the full config file
         setup_logger(self.config)
 
@@ -25,7 +26,7 @@ class TrainOpenGanPipeline:
         # init recorder
         recorder = get_recorder(self.config)
 
-        print('Start training...', flush=True)
+        print("Start training...", flush=True)
         for epoch_idx in range(1, self.config.optimizer.num_epochs + 1):
             # train the model
             net, train_metrics = trainer.train_epoch(epoch_idx)
@@ -33,4 +34,4 @@ class TrainOpenGanPipeline:
             recorder.report(train_metrics)
         recorder.summary()
 
-        print('Completed!', flush=True)
+        print("Completed!", flush=True)

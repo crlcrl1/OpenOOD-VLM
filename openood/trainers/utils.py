@@ -1,5 +1,9 @@
+from collections.abc import Callable, Sequence
+from typing import Any
+
 from torch.utils.data import DataLoader
 
+from openood._typing import Network, Trainer
 from openood.utils import Config
 
 from .arpl_gan_trainer import ARPLGANTrainer
@@ -18,71 +22,76 @@ from .godin_trainer import GodinTrainer
 from .kdad_trainer import KdadTrainer
 from .logitnorm_trainer import LogitNormTrainer
 from .mcd_trainer import MCDTrainer
+from .mixoe_trainer import MixOETrainer
 from .mixup_trainer import MixupTrainer
 from .mos_trainer import MOSTrainer
 from .npos_trainer import NPOSTrainer
 from .oe_trainer import OETrainer
+from .oodmixup_trainer import OodMixupTrainer, OodMixupTrainer_idood
+from .oodmixup_trainer_v2 import OodMixupTrainer_v2
 from .opengan_trainer import OpenGanTrainer
 from .rd4ad_trainer import Rd4adTrainer
+from .regmixup_trainer import RegMixupTrainer
+from .rotpred_trainer import RotPredTrainer
+from .rts_trainer import RTSTrainer
 from .sae_trainer import SAETrainer
 from .udg_trainer import UDGTrainer
 from .vos_trainer import VOSTrainer
-from .rts_trainer import RTSTrainer
-from .rotpred_trainer import RotPredTrainer
-from .regmixup_trainer import RegMixupTrainer
-from .mixoe_trainer import MixOETrainer
-from .oodmixup_trainer import OodMixupTrainer, OodMixupTrainer_idood
-from .oodmixup_trainer_v2 import OodMixupTrainer_v2 
 
 
-def get_trainer(net, train_loader: DataLoader, val_loader: DataLoader,
-                config: Config):
+def get_trainer(
+    net: Network,
+    train_loader: DataLoader | Sequence[DataLoader],
+    val_loader: DataLoader | None,
+    config: Config,
+) -> Trainer[Any]:
+    trainers: dict[str, Callable[..., Trainer[Any]]]
     if type(train_loader) is DataLoader:
         trainers = {
-            'base': BaseTrainer,
-            'augmix': AugMixTrainer,
-            'mixup': MixupTrainer,
-            'regmixup': RegMixupTrainer,
-            'sae': SAETrainer,
-            'draem': DRAEMTrainer,
-            'kdad': KdadTrainer,
-            'conf_branch': ConfBranchTrainer,
-            'dcae': AETrainer,
-            'dsvdd': DSVDDTrainer,
-            'npos': NPOSTrainer,
-            'opengan': OpenGanTrainer,
-            'kdad': KdadTrainer,
-            'godin': GodinTrainer,
-            'arpl': ARPLTrainer,
-            'arpl_gan': ARPLGANTrainer,
-            'mos': MOSTrainer,
-            'vos': VOSTrainer,
-            'cider': CIDERTrainer,
-            'cutpaste': CutPasteTrainer,
-            'cutmix': CutMixTrainer,
-            'dropout': DropoutTrainer,
-            'csi': CSITrainer,
-            'logitnorm': LogitNormTrainer,
-            'rd4ad': Rd4adTrainer,
-            'rts': RTSTrainer,
-            'rotpred': RotPredTrainer,
+            "base": BaseTrainer,
+            "augmix": AugMixTrainer,
+            "mixup": MixupTrainer,
+            "regmixup": RegMixupTrainer,
+            "sae": SAETrainer,
+            "draem": DRAEMTrainer,
+            "kdad": KdadTrainer,
+            "conf_branch": ConfBranchTrainer,
+            "dcae": AETrainer,
+            "dsvdd": DSVDDTrainer,
+            "npos": NPOSTrainer,
+            "opengan": OpenGanTrainer,
+            "kdad": KdadTrainer,
+            "godin": GodinTrainer,
+            "arpl": ARPLTrainer,
+            "arpl_gan": ARPLGANTrainer,
+            "mos": MOSTrainer,
+            "vos": VOSTrainer,
+            "cider": CIDERTrainer,
+            "cutpaste": CutPasteTrainer,
+            "cutmix": CutMixTrainer,
+            "dropout": DropoutTrainer,
+            "csi": CSITrainer,
+            "logitnorm": LogitNormTrainer,
+            "rd4ad": Rd4adTrainer,
+            "rts": RTSTrainer,
+            "rotpred": RotPredTrainer,
             #############
-            'oodmixup': OodMixupTrainer,
-            'oodmixup_idood': OodMixupTrainer_idood, 
-            'oodmixup_v2': OodMixupTrainer_v2,
+            "oodmixup": OodMixupTrainer,
+            "oodmixup_idood": OodMixupTrainer_idood,
+            "oodmixup_v2": OodMixupTrainer_v2,
         }
-        if config.trainer.name in ['cider', 'npos']:
-            return trainers[config.trainer.name](net, train_loader, val_loader,
-                                                 config)
+        if config.trainer.name in ["cider", "npos"]:
+            return trainers[config.trainer.name](net, train_loader, val_loader, config)
         else:
             return trainers[config.trainer.name](net, train_loader, config)
 
     else:
         trainers = {
-            'oe': OETrainer,
-            'mcd': MCDTrainer,
-            'udg': UDGTrainer,
-            'mixoe': MixOETrainer
+            "oe": OETrainer,
+            "mcd": MCDTrainer,
+            "udg": UDGTrainer,
+            "mixoe": MixOETrainer,
         }
-        return trainers[config.trainer.name](net, train_loader[0],
-                                             train_loader[1], config)
+        return trainers[config.trainer.name](
+            net, train_loader[0], train_loader[1], config
+        )

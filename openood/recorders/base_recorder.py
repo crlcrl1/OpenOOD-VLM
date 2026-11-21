@@ -4,9 +4,12 @@ from pathlib import Path
 
 import torch
 
+from openood._typing import Metrics
+from openood.utils.config import Config
+
 
 class BaseRecorder:
-    def __init__(self, config) -> None:
+    def __init__(self, config: Config) -> None:
         self.config = config
 
         self.best_acc = 0.0
@@ -14,7 +17,7 @@ class BaseRecorder:
 
         self.begin_time = time.time()
         self.output_dir = config.output_dir
-        
+
     ## original
     # def report(self, train_metrics, val_metrics):
     #     print('\nEpoch {:03d} | Time {:5d}s | Train Loss {:.4f} | '
@@ -24,15 +27,18 @@ class BaseRecorder:
     #               val_metrics['loss'], 100.0 * val_metrics['acc']),
     #           flush=True)
 
-    def report(self, train_metrics, val_metrics):
-        print('\nEpoch {:03d} | Time {:5d}s | Train Loss {:.4f} | '
-              ' Val Acc {:.2f}'.format(
-                  (train_metrics['epoch_idx']),
-                  int(time.time() - self.begin_time), train_metrics['loss'],
-                  100.0 * val_metrics['acc']),
-              flush=True)
+    def report(self, train_metrics: Metrics, val_metrics: Metrics) -> None:
+        print(
+            "\nEpoch {:03d} | Time {:5d}s | Train Loss {:.4f} |  Val Acc {:.2f}".format(
+                (train_metrics["epoch_idx"]),
+                int(time.time() - self.begin_time),
+                train_metrics["loss"],
+                100.0 * val_metrics["acc"],
+            ),
+            flush=True,
+        )
 
-    def save_model(self, net, val_metrics):
+    def save_model(self, net: torch.nn.Module, val_metrics: Metrics) -> None:
         try:
             state_dict = net.module.state_dict()
         except AttributeError:
@@ -43,27 +49,30 @@ class BaseRecorder:
                 state_dict,
                 os.path.join(
                     self.output_dir,
-                    'model_epoch{}.ckpt'.format(val_metrics['epoch_idx'])))
+                    "model_epoch{}.ckpt".format(val_metrics["epoch_idx"]),
+                ),
+            )
 
         # enter only if better accuracy occurs
-        if val_metrics['acc'] >= self.best_acc:
+        if val_metrics["acc"] >= self.best_acc:
             # delete the depreciated best model
-            old_fname = 'best_epoch{}_acc{:.4f}.ckpt'.format(
-                self.best_epoch_idx, self.best_acc)
+            old_fname = "best_epoch{}_acc{:.4f}.ckpt".format(
+                self.best_epoch_idx, self.best_acc
+            )
             old_pth = os.path.join(self.output_dir, old_fname)
             Path(old_pth).unlink(missing_ok=True)
 
             # update the best model
-            self.best_epoch_idx = val_metrics['epoch_idx']
-            self.best_acc = val_metrics['acc']
-            torch.save(state_dict, os.path.join(self.output_dir, 'best.ckpt'))
+            self.best_epoch_idx = val_metrics["epoch_idx"]
+            self.best_acc = val_metrics["acc"]
+            torch.save(state_dict, os.path.join(self.output_dir, "best.ckpt"))
 
             ## only save the best.ckpt to save space.
             # save_fname = 'best_epoch{}_acc{:.4f}.ckpt'.format(
             #     self.best_epoch_idx, self.best_acc)
             # save_pth = os.path.join(self.output_dir, save_fname)
             # torch.save(state_dict, save_pth)
-            
+
         ## only save the best.ckpt to save space.
         # # save last path
         # if val_metrics['epoch_idx'] == self.config.optimizer.num_epochs:
@@ -72,8 +81,10 @@ class BaseRecorder:
         #     save_pth = os.path.join(self.output_dir, save_fname)
         #     torch.save(state_dict, save_pth)
 
-    def summary(self):
-        print('Training Completed! '
-              'Best accuracy: {:.2f} '
-              'at epoch {:d}'.format(100 * self.best_acc, self.best_epoch_idx),
-              flush=True)
+    def summary(self) -> None:
+        print(
+            "Training Completed! Best accuracy: {:.2f} at epoch {:d}".format(
+                100 * self.best_acc, self.best_epoch_idx
+            ),
+            flush=True,
+        )

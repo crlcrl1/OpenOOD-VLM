@@ -4,15 +4,20 @@ ImageNet-Style ResNet
     Deep Residual Learning for Image Recognition. arXiv:1512.03385
 Adapted from: https://github.com/bearpaw/pytorch-classification
 """
+from collections.abc import Sequence
+from typing import Any
+
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1, is_last=False):
+    def __init__(
+        self, in_planes: int, planes: int, stride: int = 1, is_last: bool = False
+    ) -> None:
         super(BasicBlock, self).__init__()
         self.is_last = is_last
         self.conv1 = nn.Conv2d(
@@ -37,7 +42,9 @@ class BasicBlock(nn.Module):
                 nn.BatchNorm2d(self.expansion * planes),
             )
 
-    def forward(self, x):
+    def forward(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         out += self.shortcut(x)
@@ -52,7 +59,9 @@ class BasicBlock(nn.Module):
 class Bottleneck(nn.Module):
     expansion = 4
 
-    def __init__(self, in_planes, planes, stride=1, is_last=False):
+    def __init__(
+        self, in_planes: int, planes: int, stride: int = 1, is_last: bool = False
+    ) -> None:
         super(Bottleneck, self).__init__()
         self.is_last = is_last
         self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=1, bias=False)
@@ -79,7 +88,9 @@ class Bottleneck(nn.Module):
                 nn.BatchNorm2d(self.expansion * planes),
             )
 
-    def forward(self, x):
+    def forward(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         out = F.relu(self.bn1(self.conv1(x)))
         out = F.relu(self.bn2(self.conv2(out)))
         out = self.bn3(self.conv3(out))
@@ -93,7 +104,13 @@ class Bottleneck(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, num_blocks, in_channel=3, zero_init_residual=False):
+    def __init__(
+        self,
+        block: type[BasicBlock | Bottleneck],
+        num_blocks: Sequence[int],
+        in_channel: int = 3,
+        zero_init_residual: bool = False,
+    ) -> None:
         super(ResNet, self).__init__()
         self.in_planes = 64
 
@@ -125,7 +142,13 @@ class ResNet(nn.Module):
                 elif isinstance(m, BasicBlock):
                     nn.init.constant_(m.bn2.weight, 0)
 
-    def _make_layer(self, block, planes, num_blocks, stride):
+    def _make_layer(
+        self,
+        block: type[BasicBlock | Bottleneck],
+        planes: int,
+        num_blocks: int,
+        stride: int,
+    ) -> nn.Sequential:
         strides = [stride] + [1] * (num_blocks - 1)
         layers = []
         for i in range(num_blocks):
@@ -134,7 +157,7 @@ class ResNet(nn.Module):
             self.in_planes = planes * block.expansion
         return nn.Sequential(*layers)
 
-    def forward(self, x, layer=100):
+    def forward(self, x: torch.Tensor, layer: int = 100) -> torch.Tensor:
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
@@ -145,19 +168,19 @@ class ResNet(nn.Module):
         return out
 
 
-def resnet18(**kwargs):
+def resnet18(**kwargs: Any) -> ResNet:
     return ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
 
 
-def resnet34(**kwargs):
+def resnet34(**kwargs: Any) -> ResNet:
     return ResNet(BasicBlock, [3, 4, 6, 3], **kwargs)
 
 
-def resnet50(**kwargs):
+def resnet50(**kwargs: Any) -> ResNet:
     return ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
 
 
-def resnet101(**kwargs):
+def resnet101(**kwargs: Any) -> ResNet:
     return ResNet(Bottleneck, [3, 4, 23, 3], **kwargs)
 
 
@@ -170,18 +193,22 @@ model_dict = {
 
 
 class SupResNet(nn.Module):
-    def __init__(self, arch="resnet50", num_classes=10, **kwargs):
+    def __init__(
+        self, arch: str = "resnet50", num_classes: int = 10, **kwargs: Any
+    ) -> None:
         super(SupResNet, self).__init__()
         m, fdim = model_dict[arch]
         self.encoder = m()
         self.head = nn.Linear(fdim, num_classes)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.head(self.encoder(x))
 
 
 class SSLResNet(nn.Module):
-    def __init__(self, arch="resnet50", out_dim=128, **kwargs):
+    def __init__(
+        self, arch: str = "resnet50", out_dim: int = 128, **kwargs: Any
+    ) -> None:
         super(SSLResNet, self).__init__()
         m, fdim = model_dict[arch]
         self.encoder = m()
@@ -189,6 +216,11 @@ class SSLResNet(nn.Module):
             nn.Linear(fdim, fdim), nn.ReLU(inplace=True), nn.Linear(fdim, out_dim)
         )
 
-    def forward(self, x, return_feature=False, return_feature_list=False):
+    def forward(
+        self,
+        x: torch.Tensor,
+        return_feature: bool = False,
+        return_feature_list: bool = False,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         temp = F.normalize(self.head(self.encoder(x)), dim=-1)
         return temp, [temp]

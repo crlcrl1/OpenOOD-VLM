@@ -1,15 +1,17 @@
 """Adapted from: https://github.com/facebookresearch/odin."""
-from typing import Any
+from collections.abc import Sequence
 
 import torch
-import torch.nn as nn
+from torch import nn
+
+from openood.preprocessors.transform import normalization_dict
+from openood.utils.config import Config
 
 from .base_postprocessor import BasePostprocessor
-from openood.preprocessors.transform import normalization_dict
 
 
 class ODINPostprocessor(BasePostprocessor):
-    def __init__(self, config):
+    def __init__(self, config: Config) -> None:
         super().__init__(config)
         self.args = self.config.postprocessor.postprocessor_args
 
@@ -21,7 +23,9 @@ class ODINPostprocessor(BasePostprocessor):
             self.input_std = [0.5, 0.5, 0.5]
         self.args_dict = self.config.postprocessor.postprocessor_sweep
 
-    def postprocess(self, net: nn.Module, data: Any):
+    def postprocess(
+        self, net: nn.Module, data: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         data.requires_grad = True
         output = net(data)
 
@@ -60,9 +64,9 @@ class ODINPostprocessor(BasePostprocessor):
 
         return pred, conf
 
-    def set_hyperparam(self, hyperparam: list):
+    def set_hyperparam(self, hyperparam: Sequence[float]) -> None:
         self.temperature = hyperparam[0]
         self.noise = hyperparam[1]
 
-    def get_hyperparam(self):
+    def get_hyperparam(self) -> list[float]:
         return [self.temperature, self.noise]

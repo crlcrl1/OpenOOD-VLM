@@ -1,8 +1,10 @@
-from torch import nn
+from torch import Tensor, nn
 
 
 class Generator(nn.Module):
-    def __init__(self, in_channels=100, feature_size=64, out_channels=512):
+    def __init__(
+        self, in_channels: int = 100, feature_size: int = 64, out_channels: int = 512
+    ) -> None:
         super(Generator, self).__init__()
         self.nz = in_channels
         self.ngf = feature_size
@@ -40,12 +42,12 @@ class Generator(nn.Module):
             # state size. (self.nc) x 64 x 64
         )
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return self.main(input)
 
 
 class Discriminator(nn.Module):
-    def __init__(self, in_channels=512, feature_size=64):
+    def __init__(self, in_channels: int = 512, feature_size: int = 64) -> None:
         super(Discriminator, self).__init__()
         self.nc = in_channels
         self.ndf = feature_size
@@ -53,12 +55,17 @@ class Discriminator(nn.Module):
             nn.Conv2d(self.nc, self.ndf * 8, 1, 1, 0, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(self.ndf * 8, self.ndf * 4, 1, 1, 0, bias=False),
-            nn.BatchNorm2d(self.ndf * 4), nn.LeakyReLU(0.2, inplace=True),
+            nn.BatchNorm2d(self.ndf * 4),
+            nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(self.ndf * 4, self.ndf * 2, 1, 1, 0, bias=False),
-            nn.BatchNorm2d(self.ndf * 2), nn.LeakyReLU(0.2, inplace=True),
+            nn.BatchNorm2d(self.ndf * 2),
+            nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(self.ndf * 2, self.ndf, 1, 1, 0, bias=False),
-            nn.BatchNorm2d(self.ndf), nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(self.ndf, 1, 1, 1, 0, bias=False), nn.Sigmoid())
+            nn.BatchNorm2d(self.ndf),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(self.ndf, 1, 1, 1, 0, bias=False),
+            nn.Sigmoid(),
+        )
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return self.main(input)

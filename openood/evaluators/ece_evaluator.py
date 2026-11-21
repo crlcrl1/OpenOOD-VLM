@@ -1,20 +1,20 @@
-import os
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import openood.utils.comm as comm
+from openood._typing import Metrics
 from openood.postprocessors import BasePostprocessor
 from openood.utils import Config
+
 from .base_evaluator import BaseEvaluator
 
 
 class ECEEvaluator(BaseEvaluator):
-    def __init__(self, config: Config):
+    def __init__(self, config: Config) -> None:
         """OOD Evaluator.
 
         Args:
@@ -22,12 +22,14 @@ class ECEEvaluator(BaseEvaluator):
         """
         super(ECEEvaluator, self).__init__(config)
 
-    def eval_acc(self,
-                 net: nn.Module,
-                 data_loader: DataLoader,
-                 postprocessor: BasePostprocessor = None,
-                 epoch_idx: int = -1,
-                 num_bins: int = 15):
+    def eval_acc(
+        self,
+        net: nn.Module,
+        data_loader: DataLoader,
+        postprocessor: BasePostprocessor | None = None,
+        epoch_idx: int = -1,
+        num_bins: int = 15,
+    ) -> Metrics:
         net.eval()
         """Calculates ECE.
         Args:
@@ -42,13 +44,10 @@ class ECEEvaluator(BaseEvaluator):
         total_preds = []
         total_labels = []
         with torch.no_grad():
-            for batch in tqdm(data_loader,
-                              desc='Eval: ',
-                              position=0,
-                              leave=True):
+            for batch in tqdm(data_loader, desc="Eval: ", position=0, leave=True):
                 # prepare data
-                data = batch['data'].cuda()
-                target = batch['label'].cuda()
+                data = batch["data"].cuda()
+                target = batch["label"].cuda()
 
                 # forward
                 output = net(data)
@@ -81,11 +80,11 @@ class ECEEvaluator(BaseEvaluator):
             # Selects the predicted classes, and the true classes
             class_pred_sec, y_sec = preds_np[sec], labels_np[sec]
             # Averages of the predicted max probabilities
-            mean_conf[i] = np.mean(
-                scores_np[sec]) if nb_items_bin[i] > 0 else np.nan
+            mean_conf[i] = np.mean(scores_np[sec]) if nb_items_bin[i] > 0 else np.nan
             # Computes the empirical confidence
-            acc_tab[i] = np.mean(
-                class_pred_sec == y_sec) if nb_items_bin[i] > 0 else np.nan
+            acc_tab[i] = (
+                np.mean(class_pred_sec == y_sec) if nb_items_bin[i] > 0 else np.nan
+            )
         # Cleaning
         mean_conf = mean_conf[nb_items_bin > 0]
         acc_tab = acc_tab[nb_items_bin > 0]
@@ -93,16 +92,17 @@ class ECEEvaluator(BaseEvaluator):
         if sum(nb_items_bin) != 0:
             ece = np.average(
                 np.absolute(mean_conf - acc_tab),
-                weights=nb_items_bin.astype(np.float) / np.sum(nb_items_bin))
+                weights=nb_items_bin.astype(np.float) / np.sum(nb_items_bin),
+            )
         else:
             ece = 0.0
 
         loss = loss_avg / len(data_loader)
         acc = correct / len(data_loader.dataset)
 
-        metrics = {}
-        metrics['epoch_idx'] = epoch_idx
-        metrics['loss'] = self.save_metrics(loss)
-        metrics['acc'] = self.save_metrics(acc)
-        metrics['ece'] = self.save_metrics(ece)
+        metrics: Metrics = {}
+        metrics["epoch_idx"] = epoch_idx
+        metrics["loss"] = self.save_metrics(loss)
+        metrics["acc"] = self.save_metrics(acc)
+        metrics["ece"] = self.save_metrics(ece)
         return metrics

@@ -1,8 +1,9 @@
 from openood.pipelines import get_pipeline
 from openood.utils import launch, setup_config
+from openood.utils.config import Config
 
 
-def main(config):
+def main(config: Config) -> None:
     """Main entrance. Config is all you need to provide to run the code. Config
     should be provided in the format of YAML and can be modified with command
     line.
@@ -24,8 +25,7 @@ def main(config):
     pipeline.run()
 
 
-if __name__ == '__main__':
-
+if __name__ == "__main__":
     config = setup_config()
     # generate output directory and save the full config file
     # setup_logger(config)
@@ -37,6 +37,6 @@ if __name__ == '__main__':
         config.num_gpus,
         num_machines=config.num_machines,
         machine_rank=config.machine_rank,
-        dist_url='auto',
-        args=(config, ),
+        dist_url="auto",
+        args=(config,),
     )

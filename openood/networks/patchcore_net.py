@@ -1,9 +1,9 @@
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 class PatchcoreNet(nn.Module):
-    def __init__(self, backbone):
+    def __init__(self, backbone: nn.Module) -> None:
         super(PatchcoreNet, self).__init__()
 
         # def hook_t(module, input, output):
@@ -23,9 +23,9 @@ class PatchcoreNet(nn.Module):
             param.requires_grad = False
         # self.module.cuda()
         backbone.cuda()
-        self.criterion = torch.nn.MSELoss(reduction='sum')
+        self.criterion = torch.nn.MSELoss(reduction="sum")
 
-    def forward(self, x, return_feature):
+    def forward(self, x: torch.Tensor, return_feature: bool) -> list[torch.Tensor]:
         _, feature_list = self.backbone(x, return_feature_list=True)
         return [feature_list[-3], feature_list[-2]]
 

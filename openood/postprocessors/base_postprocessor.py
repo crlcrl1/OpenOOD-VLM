@@ -1,35 +1,45 @@
-from typing import Any
-from tqdm import tqdm
+from typing import cast
 
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
-import openood.utils.comm as comm
+from openood._typing import LoaderDict, OODLoaders, ScoreArrays
+from openood.utils import comm
+from openood.utils.config import Config
 
-class BasePostprocessor:
-    def __init__(self, config):
+
+class BasePostprocessor[Model = nn.Module]:
+    APS_mode: bool
+    hyperparam_search_done: bool
+
+    def __init__(self, config: Config) -> None:
         self.config = config
 
-    def setup(self, net: nn.Module, id_loader_dict, ood_loader_dict):
+    def setup(
+        self, net: Model, id_loader_dict: LoaderDict, ood_loader_dict: OODLoaders
+    ) -> None:
         pass
 
     @torch.no_grad()
-    def postprocess(self, net: nn.Module, data: Any):
-        output = net(data)
+    def postprocess(
+        self, net: Model, data: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        output = cast(nn.Module, net)(data)
         score = torch.softmax(output, dim=1)
         conf, pred = torch.max(score, dim=1)
         return pred, conf
 
-    def inference(self,
-                  net: nn.Module,
-                  data_loader: DataLoader,
-                  progress: bool = True):
+    def inference(
+        self, net: Model, data_loader: DataLoader, progress: bool = True
+    ) -> ScoreArrays:
         pred_list, conf_list, label_list = [], [], []
-        for batch in tqdm(data_loader,
-                          disable=not progress or not comm.is_main_process()):
-            data = batch['data'].cuda()
-            label = batch['label'].cuda()
+        for batch in tqdm(
+            data_loader, disable=not progress or not comm.is_main_process()
+        ):
+            data = batch["data"].cuda()
+            label = batch["label"].cuda()
             pred, conf = self.postprocess(net, data)
 
             pred_list.append(pred.cpu())

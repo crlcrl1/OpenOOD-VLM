@@ -1,17 +1,19 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from openood._typing import Metrics
 from openood.utils import Config
 
 from .lr_scheduler import cosine_annealing
 
 
 class CutPasteTrainer:
-    def __init__(self, net: nn.Module, train_loader: DataLoader,
-                 config: Config) -> None:
+    def __init__(
+        self, net: nn.Module, train_loader: DataLoader, config: Config
+    ) -> None:
 
         self.net = net
         self.train_loader = train_loader
@@ -35,7 +37,7 @@ class CutPasteTrainer:
             ),
         )
 
-    def train_epoch(self, epoch_idx):
+    def train_epoch(self, epoch_idx: int) -> tuple[nn.Module, Metrics]:
         self.net.train()
 
         loss_avg = 0.0
@@ -43,16 +45,17 @@ class CutPasteTrainer:
 
         embeds = []
 
-        for train_step in tqdm(range(1,
-                                     len(train_dataiter) + 1),
-                               desc='Epoch {:03d}: '.format(epoch_idx),
-                               position=0,
-                               leave=True):
+        for train_step in tqdm(
+            range(1, len(train_dataiter) + 1),
+            desc="Epoch {:03d}: ".format(epoch_idx),
+            position=0,
+            leave=True,
+        ):
             batch = next(train_dataiter)
-            data = torch.cat(batch['data'], 0)
+            data = torch.cat(batch["data"], 0)
             data = data.cuda()
             y = torch.arange(2)
-            y = y.repeat_interleave(len(batch['data'][0]))
+            y = y.repeat_interleave(len(batch["data"][0]))
             y = y.cuda()
             # forward
             embed, logits_classifier = self.net(data)
@@ -73,8 +76,8 @@ class CutPasteTrainer:
         embeds = torch.cat(embeds)
         embeds = torch.nn.functional.normalize(embeds, p=2, dim=1)
 
-        metrics = {}
-        metrics['epoch_idx'] = epoch_idx
-        metrics['loss'] = loss_avg
+        metrics: Metrics = {}
+        metrics["epoch_idx"] = epoch_idx
+        metrics["loss"] = loss_avg
 
         return self.net, metrics

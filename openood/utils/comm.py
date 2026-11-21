@@ -3,14 +3,15 @@
 
 This is useful when doing distributed training.
 """
-
 import functools
+from typing import cast
 
 import numpy as np
 import torch
 import torch.distributed as dist
+from torch.distributed import ProcessGroup
 
-_LOCAL_PROCESS_GROUP = None
+_LOCAL_PROCESS_GROUP: ProcessGroup | None = None
 """
 A torch process group which only includes processes
 that on the same machine as the current process.
@@ -45,10 +46,9 @@ def get_local_rank() -> int:
         return 0
     if not dist.is_initialized():
         return 0
-    assert (
-        _LOCAL_PROCESS_GROUP is not None
-    ), 'Local process group is not created! '\
-        'Please use launch() to spawn processes!'
+    assert _LOCAL_PROCESS_GROUP is not None, (
+        "Local process group is not created! Please use launch() to spawn processes!"
+    )
     return dist.get_rank(group=_LOCAL_PROCESS_GROUP)
 
 
@@ -69,7 +69,7 @@ def is_main_process() -> bool:
     return get_rank() == 0
 
 
-def synchronize():
+def synchronize() -> None:
     """Helper function to synchronize (barrier) among all processes when using
     distributed training."""
     if not dist.is_available():
@@ -88,16 +88,17 @@ def synchronize():
 
 
 @functools.lru_cache()
-def _get_global_gloo_group():
+def _get_global_gloo_group() -> ProcessGroup:
     """Return a process group based on gloo backend, containing all the ranks
     The result is cached."""
-    if dist.get_backend() == 'nccl':
-        return dist.new_group(backend='gloo')
+    if dist.get_backend() == "nccl":
+        # With no rank list, the new group contains every rank.
+        return cast(ProcessGroup, dist.new_group(backend="gloo"))
     else:
-        return dist.group.WORLD
+        return cast(ProcessGroup, dist.group.WORLD)
 
 
-def all_gather(data, group=None):
+def all_gather[T](data: T, group: ProcessGroup | None = None) -> list[T]:
     """Run all_gather on arbitrary picklable data (not necessarily tensors).
 
     Args:
@@ -111,7 +112,8 @@ def all_gather(data, group=None):
     if get_world_size() == 1:
         return [data]
     if group is None:
-        group = _get_global_gloo_group(
+        group = (
+            _get_global_gloo_group()
         )  # use CPU group by default, to reduce GPU RAM usage.
     world_size = dist.get_world_size(group)
     if world_size == 1:
@@ -119,10 +121,10 @@ def all_gather(data, group=None):
 
     output = [None for _ in range(world_size)]
     dist.all_gather_object(output, data, group=group)
-    return output
+    return cast(list[T], output)
 
 
-def gather(data, dst=0, group=None):
+def gather[T](data: T, dst: int = 0, group: ProcessGroup | None = None) -> list[T]:
     """Run gather on arbitrary picklable data (not necessarily tensors).
 
     Args:
@@ -147,13 +149,13 @@ def gather(data, dst=0, group=None):
     if rank == dst:
         output = [None for _ in range(world_size)]
         dist.gather_object(data, output, dst=dst, group=group)
-        return output
+        return cast(list[T], output)
     else:
         dist.gather_object(data, None, dst=dst, group=group)
         return []
 
 
-def shared_random_seed():
+def shared_random_seed() -> int:
     """
     Returns:
         int: a random number that is the same across all workers.
@@ -167,7 +169,9 @@ def shared_random_seed():
     return all_ints[0]
 
 
-def reduce_dict(input_dict, average=True):
+def reduce_dict(
+    input_dict: dict[str, torch.Tensor], average: bool = True
+) -> dict[str, torch.Tensor]:
     """Reduce the values in the dictionary from all processes so that process
     with rank 0 has the reduced results.
 

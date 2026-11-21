@@ -1,16 +1,19 @@
-from typing import Any
+from collections.abc import Sequence
 
 import faiss
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 from tqdm import tqdm
+
+from openood._typing import LoaderDict, OODLoaders
+from openood.utils.config import Config
 
 from .base_postprocessor import BasePostprocessor
 
 
 class CIDERPostprocessor(BasePostprocessor):
-    def __init__(self, config):
+    def __init__(self, config: Config) -> None:
         super(CIDERPostprocessor, self).__init__(config)
         self.args = self.config.postprocessor.postprocessor_args
         self.K = self.args.K
@@ -18,16 +21,17 @@ class CIDERPostprocessor(BasePostprocessor):
         self.args_dict = self.config.postprocessor.postprocessor_sweep
         self.setup_flag = False
 
-    def setup(self, net: nn.Module, id_loader_dict, ood_loader_dict):
+    def setup(
+        self, net: nn.Module, id_loader_dict: LoaderDict, ood_loader_dict: OODLoaders
+    ) -> None:
         if not self.setup_flag:
             activation_log = []
             net.eval()
             with torch.no_grad():
-                for batch in tqdm(id_loader_dict['train'],
-                                  desc='Setup: ',
-                                  position=0,
-                                  leave=True):
-                    data = batch['data'].cuda()
+                for batch in tqdm(
+                    id_loader_dict["train"], desc="Setup: ", position=0, leave=True
+                ):
+                    data = batch["data"].cuda()
 
                     feature = net.intermediate_forward(data)
                     activation_log.append(feature.data.cpu().numpy())
@@ -40,7 +44,9 @@ class CIDERPostprocessor(BasePostprocessor):
             pass
 
     @torch.no_grad()
-    def postprocess(self, net: nn.Module, data: Any):
+    def postprocess(
+        self, net: nn.Module, data: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         feature = net.intermediate_forward(data)
         D, _ = self.index.search(
             feature.cpu().numpy(),  # feature is already normalized within net
@@ -52,8 +58,8 @@ class CIDERPostprocessor(BasePostprocessor):
         pred = torch.zeros(len(kth_dist))
         return pred, torch.from_numpy(kth_dist)
 
-    def set_hyperparam(self, hyperparam: list):
+    def set_hyperparam(self, hyperparam: Sequence[int]) -> None:
         self.K = hyperparam[0]
 
-    def get_hyperparam(self):
+    def get_hyperparam(self) -> int:
         return self.K

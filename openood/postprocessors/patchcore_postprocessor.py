@@ -1,21 +1,26 @@
-from __future__ import absolute_import, division, print_function
 
 import abc
 import os
+from collections.abc import Sequence
+from typing import Any
 
 import faiss
 import numpy as np
 import torch
+from sklearn.base import BaseEstimator
 from sklearn.metrics import pairwise_distances
 from sklearn.random_projection import SparseRandomProjection
 from torch import nn
 from torch.nn import functional as F
 from tqdm import tqdm
 
+from openood._typing import LoaderDict, OODLoaders
+from openood.utils.config import Config
+
 from .base_postprocessor import BasePostprocessor
 
 
-def embedding_concat(x, y):
+def embedding_concat(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     B, C1, H1, W1 = x.size()
     _, C2, H2, W2 = y.size()
     s = int(H1 / H2)
@@ -29,7 +34,7 @@ def embedding_concat(x, y):
     return z
 
 
-def reshape_embedding(embedding):
+def reshape_embedding(embedding: np.ndarray) -> list[np.ndarray]:
     embedding_list = []
     for k in range(embedding.shape[0]):
         for i in range(embedding.shape[2]):
@@ -39,7 +44,7 @@ def reshape_embedding(embedding):
 
 
 class PatchcorePostprocessor(BasePostprocessor):
-    def __init__(self, config):
+    def __init__(self, config: Config) -> None:
         super(PatchcorePostprocessor, self).__init__(config)
         self.config = config
         self.postprocessor_args = config.postprocessor.postprocessor_args
@@ -53,19 +58,20 @@ class PatchcorePostprocessor(BasePostprocessor):
         self.img_path_list = []
         self.features = []
 
-    def setup(self, net: nn.Module, id_loader_dict, ood_loader_dict):
+    def setup(
+        self, net: nn.Module, id_loader_dict: LoaderDict, ood_loader_dict: OODLoaders
+    ) -> None:
         # step 1:
         self.model = net
         # on train start
         self.model.eval()  # to stop running_var move (maybe not critical)
         self.embedding_list = []
 
-        if (self.config.network.load_cached_faiss):
+        if self.config.network.load_cached_faiss:
             path = self.config.output_dir
             # load index
-            if os.path.isfile(os.path.join(path, 'index.faiss')):
-                self.index = faiss.read_index(os.path.join(
-                    path, 'index.faiss'))
+            if os.path.isfile(os.path.join(path, "index.faiss")):
+                self.index = faiss.read_index(os.path.join(path, "index.faiss"))
                 if torch.cuda.is_available():
                     res = faiss.StandardGpuResources()
                     self.index = faiss.index_cpu_to_gpu(res, 0, self.index)
@@ -73,14 +79,13 @@ class PatchcorePostprocessor(BasePostprocessor):
                 return
 
         # training step
-        train_dataiter = iter(id_loader_dict['train'])
+        train_dataiter = iter(id_loader_dict["train"])
 
-        for train_step in tqdm(range(1,
-                                     len(train_dataiter) + 1),
-                               position=0,
-                               leave=True):
+        for train_step in tqdm(
+            range(1, len(train_dataiter) + 1), position=0, leave=True
+        ):
             batch = next(train_dataiter)
-            x = batch['data'].cuda()
+            x = batch["data"].cuda()
             features = self.model.forward(x, return_feature=True)
             embeddings = []
             for feature in features:
@@ -93,39 +98,43 @@ class PatchcorePostprocessor(BasePostprocessor):
         total_embeddings = np.array(self.embedding_list)
 
         # Random projection
-        print('Random projection')
+        print("Random projection")
         self.randomprojector = SparseRandomProjection(
-            n_components='auto',
-            eps=0.9)  # 'auto' => Johnson-Lindenstrauss lemma
+            n_components="auto", eps=0.9
+        )  # 'auto' => Johnson-Lindenstrauss lemma
         self.randomprojector.fit(total_embeddings)
         # Coreset Subsampling
-        print('Coreset Subsampling')
+        print("Coreset Subsampling")
         selector = kCenterGreedy(total_embeddings, 0, 0)
         selected_idx = selector.select_batch(
             model=self.randomprojector,
             already_selected=[],
-            N=int(total_embeddings.shape[0] *
-                  self.postprocessor_args.coreset_sampling_ratio))
+            N=int(
+                total_embeddings.shape[0]
+                * self.postprocessor_args.coreset_sampling_ratio
+            ),
+        )
         self.embedding_coreset = total_embeddings[selected_idx]
 
-        print('initial embedding size : ', total_embeddings.shape)
-        print('final embedding size : ', self.embedding_coreset.shape)
+        print("initial embedding size : ", total_embeddings.shape)
+        print("final embedding size : ", self.embedding_coreset.shape)
         # faiss
-        print('faiss indexing')
+        print("faiss indexing")
         self.index = faiss.IndexFlatL2(self.embedding_coreset.shape[1])
         self.index.add(self.embedding_coreset)
-        if not os.path.isdir(os.path.join('./results/patch/')):
-            os.mkdir('./results/patch/')
-        faiss.write_index(self.index,
-                          os.path.join('./results/patch/', 'index.faiss'))
+        if not os.path.isdir(os.path.join("./results/patch/")):
+            os.mkdir("./results/patch/")
+        faiss.write_index(self.index, os.path.join("./results/patch/", "index.faiss"))
 
-    def init_results_list(self):
+    def init_results_list(self) -> None:
         self.gt_list_px_lvl = []
         self.pred_list_px_lvl = []
         self.gt_list_img_lvl = []
         self.pred_list_img_lvl = []
 
-    def postprocess(self, net: nn.Module, data):
+    def postprocess(
+        self, net: nn.Module, data: torch.Tensor
+    ) -> tuple[list[torch.Tensor], torch.Tensor]:
 
         self.init_results_list()
         score_patch = []
@@ -138,13 +147,12 @@ class PatchcorePostprocessor(BasePostprocessor):
                 embeddings.append(m(feature))
             embedding_ = embedding_concat(embeddings[0], embeddings[1])
             embedding_test = np.array(reshape_embedding(np.array(embedding_)))
-            score_patches, _ = self.index.search(embedding_test,
-                                                 k=self.n_neighbors)
+            score_patches, _ = self.index.search(embedding_test, k=self.n_neighbors)
 
             score_patch.append(score_patches)
 
             N_b = score_patches[np.argmax(score_patches[:, 0])]
-            w = (1 - (np.max(np.exp(N_b)) / np.sum(np.exp(N_b))))
+            w = 1 - (np.max(np.exp(N_b)) / np.sum(np.exp(N_b)))
             score = w * max(score_patches[:, 0])  # Image-level score
 
             self.pred_list_img_lvl.append(score)
@@ -152,7 +160,7 @@ class PatchcorePostprocessor(BasePostprocessor):
         pred = []
         for i in self.pred_list_img_lvl:
             # 6.3 is the trial value.
-            if (i > 6.3):
+            if i > 6.3:
                 pred.append(torch.tensor(1))
             else:
                 pred.append(torch.tensor(-1))
@@ -166,12 +174,12 @@ class PatchcorePostprocessor(BasePostprocessor):
 
         for patchscore in np.concatenate([conf.cpu().tolist()]):
             N_b = patchscore[np.argmax(patchscore[:, 0])]
-            w = (1 - (np.max(np.exp(N_b)) / np.sum(np.exp(N_b))))
+            w = 1 - (np.max(np.exp(N_b)) / np.sum(np.exp(N_b)))
             score = w * max(patchscore[:, 0])  # Image-level score
 
             pred_list_img_lvl.append(score)
 
-        if self.config.evaluator.name == 'patch':
+        if self.config.evaluator.name == "patch":
             return pred, conf
         else:
             return pred, -1 * torch.tensor(pred_list_img_lvl).cuda()
@@ -202,12 +210,14 @@ class SamplingMethod(object):
     __metaclass__ = abc.ABCMeta
 
     @abc.abstractmethod
-    def __init__(self, X, y, seed, **kwargs):
+    def __init__(
+        self, X: np.ndarray, y: np.ndarray | int, seed: int, **kwargs: Any
+    ) -> None:
         self.X = X
         self.y = y
         self.seed = seed
 
-    def flatten_X(self):
+    def flatten_X(self) -> np.ndarray:
         shape = self.X.shape
         flat_X = self.X
         if len(shape) > 2:
@@ -215,13 +225,13 @@ class SamplingMethod(object):
         return flat_X
 
     @abc.abstractmethod
-    def select_batch_(self):
+    def select_batch_(self) -> list[int] | None:
         return
 
-    def select_batch(self, **kwargs):
+    def select_batch(self, **kwargs: Any) -> list[int] | None:
         return self.select_batch_(**kwargs)
 
-    def to_dict(self):
+    def to_dict(self) -> None:
         return None
 
 
@@ -255,21 +265,25 @@ Resulting centers are solution to multiple integer program.
 
 
 class kCenterGreedy(SamplingMethod):
-    def __init__(self, X, y, seed, metric='euclidean'):
+    def __init__(
+        self, X: np.ndarray, y: np.ndarray | int, seed: int, metric: str = "euclidean"
+    ) -> None:
         self.X = X
         self.y = y
         self.flat_X = self.flatten_X()
-        self.name = 'kcenter'
+        self.name = "kcenter"
         self.features = self.flat_X
         self.metric = metric
         self.min_distances = None
         self.n_obs = self.X.shape[0]
         self.already_selected = []
 
-    def update_distances(self,
-                         cluster_centers,
-                         only_new=True,
-                         reset_dist=False):
+    def update_distances(
+        self,
+        cluster_centers: Sequence[int],
+        only_new: bool = True,
+        reset_dist: bool = False,
+    ) -> None:
         """Update min distances given cluster centers.
 
         Args:
@@ -295,7 +309,13 @@ class kCenterGreedy(SamplingMethod):
             else:
                 self.min_distances = np.minimum(self.min_distances, dist)
 
-    def select_batch_(self, model, already_selected, N, **kwargs):
+    def select_batch_(
+        self,
+        model: BaseEstimator,
+        already_selected: Sequence[int],
+        N: int,
+        **kwargs: Any,
+    ) -> list[int]:
         """Diversity promoting active learning method that greedily forms a
         batch to minimize the maximum distance to a cluster center among all
         unlabeled datapoints.
@@ -312,17 +332,13 @@ class kCenterGreedy(SamplingMethod):
         try:
             # Assumes that the transform function takes in original data and
             # not flattened data.
-            print('Getting transformed features...')
+            print("Getting transformed features...")
             self.features = model.transform(self.X)
-            print('Calculating distances...')
-            self.update_distances(already_selected,
-                                  only_new=False,
-                                  reset_dist=True)
+            print("Calculating distances...")
+            self.update_distances(already_selected, only_new=False, reset_dist=True)
         except:
-            print('Using flat_X as features.')
-            self.update_distances(already_selected,
-                                  only_new=True,
-                                  reset_dist=False)
+            print("Using flat_X as features.")
+            self.update_distances(already_selected, only_new=True, reset_dist=False)
 
         new_batch = []
 
@@ -338,8 +354,9 @@ class kCenterGreedy(SamplingMethod):
 
             self.update_distances([ind], only_new=True, reset_dist=False)
             new_batch.append(ind)
-        print('Maximum distance from cluster centers is %0.2f' %
-              max(self.min_distances))
+        print(
+            "Maximum distance from cluster centers is %0.2f" % max(self.min_distances)
+        )
 
         self.already_selected = already_selected
 

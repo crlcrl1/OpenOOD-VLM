@@ -1,39 +1,48 @@
-from typing import Any
+from collections.abc import Sequence
+from math import ceil
 
-import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 from tqdm import tqdm
 
+from openood._typing import LoaderDict, OODLoaders
+from openood.utils.config import Config
+
 from .base_postprocessor import BasePostprocessor
-from math import ceil
+
 """ Code borrowed from https://github.com/snu-mllab/Neural-Relation-Graph
 """
 
 
-def normalize(feat, nc=50000):
+def normalize(feat: torch.Tensor, nc: int = 50000) -> torch.Tensor:
     with torch.no_grad():
         split = ceil(len(feat) / nc)
         for i in range(split):
-            feat_ = feat[i * nc:(i + 1) * nc]
-            feat[i * nc:(i + 1) *
-                 nc] = feat_ / torch.sqrt((feat_**2).sum(-1) + 1e-10).reshape(-1, 1)
+            feat_ = feat[i * nc : (i + 1) * nc]
+            feat[i * nc : (i + 1) * nc] = feat_ / torch.sqrt(
+                (feat_**2).sum(-1) + 1e-10
+            ).reshape(-1, 1)
 
     return feat
 
 
-def kernel(feat, feat_t, prob, prob_t, split=2):
-    """Kernel function (assume feature is normalized)
-    """
+def kernel(
+    feat: torch.Tensor,
+    feat_t: torch.Tensor,
+    prob: torch.Tensor,
+    prob_t: torch.Tensor,
+    split: int = 2,
+) -> torch.Tensor:
+    """Kernel function (assume feature is normalized)"""
     size = ceil(len(feat_t) / split)
     rel_full = []
     for i in range(split):
-        feat_t_ = feat_t[i * size:(i + 1) * size]
-        prob_t_ = prob_t[i * size:(i + 1) * size]
+        feat_t_ = feat_t[i * size : (i + 1) * size]
+        prob_t_ = prob_t[i * size : (i + 1) * size]
 
         with torch.no_grad():
             dot = torch.matmul(feat, feat_t_.transpose(1, 0))
-            dot = torch.clamp(dot, min=0.)
+            dot = torch.clamp(dot, min=0.0)
 
             sim = torch.matmul(prob, prob_t_.transpose(1, 0))
             rel = dot * sim
@@ -44,9 +53,17 @@ def kernel(feat, feat_t, prob, prob_t, split=2):
     return rel_full
 
 
-def get_relation(feat, feat_t, prob, prob_t, pow=1, chunk=50, thres=0.03):
+def get_relation(
+    feat: torch.Tensor,
+    feat_t: torch.Tensor,
+    prob: torch.Tensor,
+    prob_t: torch.Tensor,
+    pow: float = 1,
+    chunk: int = 50,
+    thres: float = 0.03,
+) -> torch.Tensor:
     """Get relation values (top-k and summation)
-    
+
     Args:
         feat (torch.Tensor [N,D]): features of the source data
         feat_t (torch.Tensor [N',D]): features of the target data
@@ -65,14 +82,14 @@ def get_relation(feat, feat_t, prob, prob_t, pow=1, chunk=50, thres=0.03):
 
     score = []
     for i in range(n_chunk):
-        feat_ = feat[i * chunk:(i + 1) * chunk]
-        prob_ = prob[i * chunk:(i + 1) * chunk]
+        feat_ = feat[i * chunk : (i + 1) * chunk]
+        prob_ = prob[i * chunk : (i + 1) * chunk]
 
         rel = kernel(feat_, feat_t, prob_, prob_t)
 
-        mask = (rel.abs() > thres)
+        mask = rel.abs() > thres
         rel_mask = mask * rel
-        edge_sum = (rel_mask.sign() * (rel_mask.abs()**pow)).sum(-1)
+        edge_sum = (rel_mask.sign() * (rel_mask.abs() ** pow)).sum(-1)
 
         score.append(edge_sum.cpu())
 
@@ -82,7 +99,7 @@ def get_relation(feat, feat_t, prob, prob_t, pow=1, chunk=50, thres=0.03):
 
 
 class RelationPostprocessor(BasePostprocessor):
-    def __init__(self, config):
+    def __init__(self, config: Config) -> None:
         super(RelationPostprocessor, self).__init__(config)
         self.args = self.config.postprocessor.postprocessor_args
         self.pow = self.args.pow
@@ -90,14 +107,18 @@ class RelationPostprocessor(BasePostprocessor):
         self.args_dict = self.config.postprocessor.postprocessor_sweep
         self.setup_flag = False
 
-    def setup(self, net: nn.Module, id_loader_dict, ood_loader_dict):
+    def setup(
+        self, net: nn.Module, id_loader_dict: LoaderDict, ood_loader_dict: OODLoaders
+    ) -> None:
         if not self.setup_flag:
             feature_log = []
             prob_log = []
             net.eval()
             with torch.no_grad():
-                for batch in tqdm(id_loader_dict['train'], desc='Setup: ', position=0, leave=True):
-                    data = batch['data'].cuda()
+                for batch in tqdm(
+                    id_loader_dict["train"], desc="Setup: ", position=0, leave=True
+                ):
+                    data = batch["data"].cuda()
                     data = data.float()
 
                     logit, feature = net(data, return_feature=True)
@@ -113,19 +134,23 @@ class RelationPostprocessor(BasePostprocessor):
             pass
 
     @torch.no_grad()
-    def postprocess(self, net: nn.Module, data: Any):
+    def postprocess(
+        self, net: nn.Module, data: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         output, feature = net(data, return_feature=True)
         feature = normalize(feature)
         prob = torch.softmax(output, dim=1)
 
-        score = get_relation(feature, self.feat_train, prob, self.prob_train, pow=self.pow)
+        score = get_relation(
+            feature, self.feat_train, prob, self.prob_train, pow=self.pow
+        )
 
         _, pred = torch.max(prob, dim=1)
 
         return pred, score
 
-    def set_hyperparam(self, hyperparam: list):
+    def set_hyperparam(self, hyperparam: Sequence[float]) -> None:
         self.pow = hyperparam[0]
 
-    def get_hyperparam(self):
+    def get_hyperparam(self) -> float:
         return self.pow

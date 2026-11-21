@@ -1,39 +1,44 @@
 import torch
 from torch.autograd import Variable
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from openood._typing import Metrics
 from openood.losses.kdad_losses import DirectionOnlyLoss, MseDirectionLoss
 from openood.utils import Config
 
 
 class KdadTrainer:
-    def __init__(self, net, train_loader, config: Config):
-        self.vgg = net['vgg']
-        self.model = net['model']
+    def __init__(
+        self, net: dict[str, torch.nn.Module], train_loader: DataLoader, config: Config
+    ) -> None:
+        self.vgg = net["vgg"]
+        self.model = net["model"]
         self.train_loader = train_loader
         self.config = config
         # choose loss type
-        if self.config['direction_loss_only']:
+        if self.config["direction_loss_only"]:
             self.criterion = DirectionOnlyLoss()
         else:
-            self.criterion = MseDirectionLoss(self.config['lamda'])
-        self.optimizer = torch.optim.Adam(self.model.parameters(),
-                                          lr=float(
-                                              self.config['learning_rate']))
+            self.criterion = MseDirectionLoss(self.config["lamda"])
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=float(self.config["learning_rate"])
+        )
 
-    def train_epoch(self, epoch_idx):
+    def train_epoch(self, epoch_idx: int) -> tuple[dict[str, torch.nn.Module], Metrics]:
 
         self.model.train()
         epoch_loss = 0
         train_dataiter = iter(self.train_loader)
 
-        for train_step in tqdm(range(1,
-                                     len(train_dataiter) + 1),
-                               desc='Epoch {:03d}'.format(epoch_idx),
-                               position=0,
-                               leave=True):
+        for train_step in tqdm(
+            range(1, len(train_dataiter) + 1),
+            desc="Epoch {:03d}".format(epoch_idx),
+            position=0,
+            leave=True,
+        ):
             batch = next(train_dataiter)
-            X = batch['data']
+            X = batch["data"]
             if X.shape[1] == 1:
                 X = X.repeat(1, 3, 1, 1)
             X = Variable(X).cuda()
@@ -57,9 +62,9 @@ class KdadTrainer:
             # Adjust weights
             self.optimizer.step()
         net = {}
-        metrics = {}
-        metrics['epoch_idx'] = epoch_idx
-        metrics['epoch_loss'] = epoch_loss
-        net['vgg'] = self.vgg
-        net['model'] = self.model
+        metrics: Metrics = {}
+        metrics["epoch_idx"] = epoch_idx
+        metrics["epoch_loss"] = epoch_loss
+        net["vgg"] = self.vgg
+        net["model"] = self.model
         return net, metrics

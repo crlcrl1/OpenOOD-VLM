@@ -1,28 +1,31 @@
-import os
-import ipdb
-import torch
-import ftfy
 import html
+import os
 import re
+
+import ftfy
+
 # from src.clip import clip as clip
 # from openood.networks.clip import clip
 # import openood.networks.clip as clip
 # from PIL import Image
-from PIL import Image, ImageFile
+from PIL import ImageFile
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-def basic_clean(text):
+
+def basic_clean(text: str) -> str:
     text = ftfy.fix_text(text)
     text = html.unescape(html.unescape(text))
     return text.strip()
 
-def whitespace_clean(text):
-    text = re.sub(r'\s+', ' ', text)
+
+def whitespace_clean(text: str) -> str:
+    text = re.sub(r"\s+", " ", text)
     text = text.strip()
     return text
 
-'''
+
+"""
 path="./data/images_classic/cinic/valid"
 save_path="./data/benchmark_imglist/cifar10/val_cinic10.txt"
 prefix="cinic/valid/"
@@ -36,27 +39,27 @@ with open(save_path,'a') as f:
             line=prefix+name+'/'+file+' '+str(label)+'\n'
             f.write(line)
     f.close()       
-'''
+"""
 ############################################################ prepare ood dataset for SUN, Place, and dtd (full textures)s
-path="./data/images_largescale/dtd/images/"
-save_path="./data/benchmark_imglist/imagenet/test_dtd.txt"
-prefix="dtd/images/"
-classes=os.listdir(path)
-valid_extensions = {'.jpg', '.jpeg', '.png'}
-with open(save_path,'w') as f:
+path = "./data/images_largescale/dtd/images/"
+save_path = "./data/benchmark_imglist/imagenet/test_dtd.txt"
+prefix = "dtd/images/"
+classes = os.listdir(path)
+valid_extensions = {".jpg", ".jpeg", ".png"}
+with open(save_path, "w") as f:
     for cla in classes:
-        used_prefix = prefix + cla 
+        used_prefix = prefix + cla
         cla_path = path + cla
         files = os.listdir(cla_path)
         for file in files:
             ext = os.path.splitext(file)[1].lower()
             if ext in valid_extensions:
-                line=used_prefix+ '/' +file+" -1\n"
+                line = used_prefix + "/" + file + " -1\n"
                 f.write(line)
             else:
-                line=used_prefix+ '/' +file+" -1\n" 
+                line = used_prefix + "/" + file + " -1\n"
                 print(line)
-    f.close()  
+    f.close()
 
 # path="./data/images_largescale/Places/images/"
 # save_path="./data/benchmark_imglist/imagenet/test_places.txt"
@@ -66,7 +69,7 @@ with open(save_path,'w') as f:
 #     for file in files:
 #         line=prefix+file+" -1\n"
 #         f.write(line)
-#     f.close()  
+#     f.close()
 
 # path="./data/images_largescale/SUN/images/"
 # save_path="./data/benchmark_imglist/imagenet/test_sun.txt"
@@ -76,7 +79,7 @@ with open(save_path,'w') as f:
 #     for file in files:
 #         line=prefix+file+" -1\n"
 #         f.write(line)
-#     f.close()  
+#     f.close()
 
 
 # path="./data/images_classic/cifar100c"
@@ -89,9 +92,9 @@ with open(save_path,'w') as f:
 #         label=(splits[1].split("."))[0]
 #         line=prefix+file+" "+label+'\n'
 #         f.write(line)
-#     f.close()  
+#     f.close()
 
-'''
+"""
 path="./data/images_largescale/imagenet_v2"
 save_path="./data/benchmark_imglist/imagenet/test_imagenetv2.txt"
 prefix="imagenet_v2/"
@@ -104,7 +107,7 @@ with open(save_path,'a') as f:
             line=prefix+label+'/'+file+' '+label+'\n'
             f.write(line)
     f.close() 
-'''
+"""
 
 # classnames = [
 #     'tench', 'goldfish', 'great white shark', 'tiger shark',
@@ -460,7 +463,7 @@ with open(save_path,'a') as f:
 #             # ipdb.set_trace()
 #             # print(contained_elements)
 #             id_flag = [s for s in contained_elements if int(s.split('_')[0]) < 1000]
-#             if len(id_flag) > 0:  ## overlap with ID classes. 
+#             if len(id_flag) > 0:  ## overlap with ID classes.
 #                 # ipdb.set_trace()
 #                 id_class += 1
 #                 continue

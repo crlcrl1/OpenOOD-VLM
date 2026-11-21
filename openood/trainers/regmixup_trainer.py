@@ -1,17 +1,22 @@
+from collections.abc import Callable
+
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import openood.utils.comm as comm
-from openood.utils import Config
+from openood._typing import Metrics
+from openood.utils import Config, comm
+
 from .lr_scheduler import cosine_annealing
 
 
 # https://github.com/FrancescoPinto/RegMixup/blob/main/models/regmixup.py
-def mixup_data(x, y, alpha=1.0):
+def mixup_data(
+    x: torch.Tensor, y: torch.Tensor, alpha: float = 1.0
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
     """Returns mixed inputs, pairs of targets, and lambda."""
 
     if alpha > 0:
@@ -26,13 +31,20 @@ def mixup_data(x, y, alpha=1.0):
     return mixed_x, y_a, y_b, lam
 
 
-def regmixup_criterion(criterion, pred, y_a, y_b, lam):
+def regmixup_criterion(
+    criterion: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    pred: torch.Tensor,
+    y_a: torch.Tensor,
+    y_b: torch.Tensor,
+    lam: float,
+) -> torch.Tensor:
     return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
 
 
 class RegMixupTrainer:
-    def __init__(self, net: nn.Module, train_loader: DataLoader,
-                 config: Config) -> None:
+    def __init__(
+        self, net: nn.Module, train_loader: DataLoader, config: Config
+    ) -> None:
 
         self.net = net
         self.train_loader = train_loader
@@ -56,23 +68,25 @@ class RegMixupTrainer:
                 1e-6 / config.optimizer.lr,
             ),
         )
-    def setup(self):
-        pass 
 
-    def train_epoch(self, epoch_idx):
+    def setup(self) -> None:
+        pass
+
+    def train_epoch(self, epoch_idx: int) -> tuple[nn.Module, Metrics]:
         self.net.train()
 
         loss_avg = 0.0
         train_dataiter = iter(self.train_loader)
 
-        for train_step in tqdm(range(1,
-                                     len(train_dataiter) + 1),
-                               desc='Epoch {:03d}: '.format(epoch_idx),
-                               position=0,
-                               leave=True,
-                               disable=not comm.is_main_process()):
+        for train_step in tqdm(
+            range(1, len(train_dataiter) + 1),
+            desc="Epoch {:03d}: ".format(epoch_idx),
+            position=0,
+            leave=True,
+            disable=not comm.is_main_process(),
+        ):
             batch = next(train_dataiter)
-            x, y = batch['data'].cuda(), batch['label'].cuda()
+            x, y = batch["data"].cuda(), batch["label"].cuda()
 
             # mixup operation
             mixup_x, part_y_a, part_y_b, lam = mixup_data(x, y, self.alpha)
@@ -82,8 +96,9 @@ class RegMixupTrainer:
 
             # forward
             logits = self.net(x)
-            loss = regmixup_criterion(F.cross_entropy, logits, targets_a,
-                                      targets_b, lam)
+            loss = regmixup_criterion(
+                F.cross_entropy, logits, targets_a, targets_b, lam
+            )
 
             # backward
             self.optimizer.zero_grad()
@@ -95,8 +110,8 @@ class RegMixupTrainer:
             with torch.no_grad():
                 loss_avg = loss_avg * 0.8 + float(loss) * 0.2
 
-        metrics = {}
-        metrics['epoch_idx'] = epoch_idx
-        metrics['loss'] = loss_avg
+        metrics: Metrics = {}
+        metrics["epoch_idx"] = epoch_idx
+        metrics["loss"] = loss_avg
 
         return self.net, metrics

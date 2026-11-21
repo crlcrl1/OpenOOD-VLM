@@ -1,7 +1,7 @@
 import nltk
-nltk.download('wordnet')
-
 from nltk.corpus import wordnet as wn
+
+nltk.download("wordnet")
 
 # 提取所有单词
 all_words = set()  # 使用集合去重
@@ -18,7 +18,7 @@ with open(output_file, "w", encoding="utf-8") as f:
 print(f"WordNet 中的单词已保存到 {output_file}，共计 {len(all_words)} 个单词。")
 
 nouns = set()
-for synset in wn.all_synsets(pos='n'):  # 只提取名词
+for synset in wn.all_synsets(pos="n"):  # 只提取名词
     for lemma in synset.lemmas():
         nouns.add(lemma.name())
 
@@ -30,7 +30,7 @@ with open("wordnet_nouns.txt", "w", encoding="utf-8") as f:
 print(f"名词保存到 wordnet_nouns.txt，数量：{len(nouns)}")
 
 adjs = set()
-for synset in wn.all_synsets(pos='a'):  # 只提取名词
+for synset in wn.all_synsets(pos="a"):  # 只提取名词
     for lemma in synset.lemmas():
         adjs.add(lemma.name())
 

@@ -1,17 +1,19 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from openood._typing import Metrics
 from openood.utils import Config
 
 from .lr_scheduler import cosine_annealing
 
 
 class DropoutTrainer:
-    def __init__(self, net: nn.Module, train_loader: DataLoader,
-                 config: Config) -> None:
+    def __init__(
+        self, net: nn.Module, train_loader: DataLoader, config: Config
+    ) -> None:
 
         self.net = net
         self.train_loader = train_loader
@@ -36,20 +38,21 @@ class DropoutTrainer:
             ),
         )
 
-    def train_epoch(self, epoch_idx):
+    def train_epoch(self, epoch_idx: int) -> tuple[nn.Module, Metrics]:
         self.net.train()
 
         loss_avg = 0.0
         train_dataiter = iter(self.train_loader)
 
-        for train_step in tqdm(range(1,
-                                     len(train_dataiter) + 1),
-                               desc='Epoch {:03d}: '.format(epoch_idx),
-                               position=0,
-                               leave=True):
+        for train_step in tqdm(
+            range(1, len(train_dataiter) + 1),
+            desc="Epoch {:03d}: ".format(epoch_idx),
+            position=0,
+            leave=True,
+        ):
             batch = next(train_dataiter)
-            data = batch['data'].cuda()
-            target = batch['label'].cuda()
+            data = batch["data"].cuda()
+            target = batch["label"].cuda()
 
             # forward
             logits_classifier = self.net.forward_with_dropout(data, self.p)
@@ -65,8 +68,8 @@ class DropoutTrainer:
             with torch.no_grad():
                 loss_avg = loss_avg * 0.8 + float(loss) * 0.2
 
-        metrics = {}
-        metrics['epoch_idx'] = epoch_idx
-        metrics['loss'] = loss_avg
+        metrics: Metrics = {}
+        metrics["epoch_idx"] = epoch_idx
+        metrics["loss"] = loss_avg
 
         return self.net, metrics

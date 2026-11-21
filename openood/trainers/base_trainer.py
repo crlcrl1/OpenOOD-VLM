@@ -1,19 +1,20 @@
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import openood.utils.comm as comm
-from openood.utils import Config
+from openood._typing import Metrics
+from openood.utils import Config, comm
 
 from .lr_scheduler import cosine_annealing
 
 
 class BaseTrainer:
-    def __init__(self, net: nn.Module, train_loader: DataLoader,
-                 config: Config) -> None:
+    def __init__(
+        self, net: nn.Module, train_loader: DataLoader, config: Config
+    ) -> None:
 
         self.net = net
         self.train_loader = train_loader
@@ -36,24 +37,26 @@ class BaseTrainer:
                 1e-6 / config.optimizer.lr,
             ),
         )
-    def setup(self):
-        pass 
 
-    def train_epoch(self, epoch_idx):
+    def setup(self) -> None:
+        pass
+
+    def train_epoch(self, epoch_idx: int) -> tuple[nn.Module, Metrics]:
         self.net.train()
 
         loss_avg = 0.0
         train_dataiter = iter(self.train_loader)
 
-        for train_step in tqdm(range(1,
-                                     len(train_dataiter) + 1),
-                               desc='Epoch {:03d}: '.format(epoch_idx),
-                               position=0,
-                               leave=True,
-                               disable=not comm.is_main_process()):
+        for train_step in tqdm(
+            range(1, len(train_dataiter) + 1),
+            desc="Epoch {:03d}: ".format(epoch_idx),
+            position=0,
+            leave=True,
+            disable=not comm.is_main_process(),
+        ):
             batch = next(train_dataiter)
-            data = batch['data'].cuda()
-            target = batch['label'].cuda()
+            data = batch["data"].cuda()
+            target = batch["label"].cuda()
 
             # forward
             logits_classifier = self.net(data)
@@ -71,13 +74,13 @@ class BaseTrainer:
 
         # comm.synchronize()
 
-        metrics = {}
-        metrics['epoch_idx'] = epoch_idx
-        metrics['loss'] = self.save_metrics(loss_avg)
+        metrics: Metrics = {}
+        metrics["epoch_idx"] = epoch_idx
+        metrics["loss"] = self.save_metrics(loss_avg)
 
         return self.net, metrics
 
-    def save_metrics(self, loss_avg):
+    def save_metrics(self, loss_avg: float) -> float:
         all_loss = comm.gather(loss_avg)
         total_losses_reduced = np.mean([x for x in all_loss])
 
