@@ -3024,6 +3024,8 @@ def get_templates(text_prompt: str) -> list[str]:
         return ["{}."]
     elif "nice" == text_prompt:
         return ["The nice {}."]
+    elif "nice_vanilla" == text_prompt:
+        return get_templates("nice") + get_templates("vanilla")
     elif "good" == text_prompt:
         return ["a good photo of the {}."]
     elif "bad" == text_prompt:
@@ -3252,7 +3254,13 @@ def get_selected_ood_text_list(
 
 # https://github.com/openai/CLIP/blob/main/notebooks/Prompt_Engineering_for_ImageNet.ipynb
 def get_text_features_neg(
-    model: ClipModel, dataset: str, text_prompt: str, text_center: bool, ood_number: int
+    model: ClipModel,
+    dataset: str,
+    text_prompt: str,
+    text_center: bool,
+    ood_number: int,
+    *,
+    uniform_negative_prompt: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     classnames = get_class_names(dataset)  # imagenet --> imagenet class names
     templates = get_templates(text_prompt)  # simple --> text prompt for each classes.
@@ -3287,7 +3295,9 @@ def get_text_features_neg(
     )
     # torch.save(selected_adj_text + selected_noun_text + unselected_adj_text + unselected_noun_text, 'text_cancidate_list.pth')
     # pdb.set_trace()
-    adj_imagenet_template = ["This is a {} photo."]
+    adj_imagenet_template = (
+        templates if uniform_negative_prompt else ["This is a {} photo."]
+    )
     with torch.no_grad():
         text_features_neg = []
         print("the adj template is set as:", adj_imagenet_template)
@@ -3363,12 +3373,21 @@ def get_text_features_neg(
     return text_features_id_ood, text_features_unselected
 
 
+def average_image_views(original: torch.Tensor, mirrored: torch.Tensor) -> torch.Tensor:
+    return torch.nn.functional.normalize(
+        original.float() + mirrored.float(), dim=-1
+    ).to(original.dtype)
+
+
 class FixedCLIP_NegOODPrompt(nn.Module):
     def __init__(self, cfg: Config) -> None:
         super().__init__()
         backbone = cfg.backbone.name  # 'ViT-B/16'
         classnames = get_class_names(cfg.backbone.dataset)  # imagenet
         self.n_cls = len(classnames)
+        self.image_view = cfg.backbone.get("image_view", "original")
+        if self.image_view not in ("original", "flip", "mean"):
+            raise ValueError("image_view must be original, flip or mean")
         # pdb.set_trace()
         self.n_output = self.n_cls + 10000
         assert backbone in clip.available_models()
@@ -3389,6 +3408,7 @@ class FixedCLIP_NegOODPrompt(nn.Module):
             cfg.backbone.text_prompt,
             cfg.backbone.text_center,
             cfg.backbone.ood_number,
+            uniform_negative_prompt=cfg.backbone.get("uniform_negative_prompt", False),
         )
 
         # print('get the text features of SUN classes for visualization.')
@@ -3432,13 +3452,20 @@ class FixedCLIP_NegOODPrompt(nn.Module):
 
         self.logit_scale = self.logit_scale.exp()
 
+    def encode_view(self, x: torch.Tensor) -> torch.Tensor:
+        image_features = self.model.encode_image(x)
+        image_features /= image_features.norm(dim=-1, keepdim=True)  ## batch * dim
+        return image_features
+
     def forward(
         self, x: torch.Tensor, return_feat: bool = False
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | torch.Tensor:
-        image_features = self.model.encode_image(x)
-        image_features /= image_features.norm(dim=-1, keepdim=True)  ## batch * dim
-
-        # pdb.set_trace()
+        image_features = self.encode_view(
+            x.flip((-1,)) if self.image_view == "flip" else x
+        )
+        if self.image_view == "mean":
+            mirrored = self.encode_view(x.flip((-1,)))
+            image_features = average_image_views(image_features, mirrored)
 
         if return_feat:
             return (

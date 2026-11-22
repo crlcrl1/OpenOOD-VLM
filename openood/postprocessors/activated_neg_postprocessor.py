@@ -220,6 +220,42 @@ def activation_aware_score(
     return conf_in
 
 
+def prefix_activation_aware_score(
+    output: torch.Tensor, id_num: int, ood_num: int, step: int
+) -> torch.Tensor:
+    """Equation 15 using one cumulative log-sum-exp over the negative labels."""
+    if step == 0:
+        return activation_aware_score(output, id_num, ood_num, step)
+    step = int(step)
+    logits = output if output.dtype == torch.float64 else output.float()
+    id_mass = logits[:, :id_num].logsumexp(1, keepdim=True)
+    negatives = logits[:, id_num:]
+    if negatives.shape[1] == 0:
+        return output.new_ones(output.shape[0])
+    ends = torch.arange(step, ood_num + step, step, device=output.device)
+    last = ends.clamp(max=negatives.shape[1]) - 1
+    prefix_mass = negatives.logcumsumexp(1).index_select(1, last)
+    return (id_mass - prefix_mass).sigmoid().to(output.dtype).mean(1)
+
+
+def topk_id_mass(id_logits: torch.Tensor, k: int) -> torch.Tensor:
+    """Fraction of the ID softmax assigned to the k most likely classes."""
+    logits = id_logits if id_logits.dtype == torch.float64 else id_logits.float()
+    probs = logits.softmax(dim=1)
+    if k == 1:
+        return probs.amax(dim=1)
+    return probs.topk(k, dim=1).values.sum(dim=1)
+
+
+def competing_id_score(
+    output: torch.Tensor, class_num: int, k: int, ood_num: int, step: int
+) -> torch.Tensor:
+    """Compete the top k ID logits against each prefix of activated negatives."""
+    top = output[:, :class_num].topk(k, dim=1).values
+    reduced = torch.cat((top, output[:, class_num:]), dim=1)
+    return prefix_activation_aware_score(reduced, k, ood_num, step)
+
+
 class ActivatedNegPostprocessor(BasePostprocessor):
     def __init__(self, config: Config) -> None:
         super(ActivatedNegPostprocessor, self).__init__(config)
@@ -243,7 +279,35 @@ class ActivatedNegPostprocessor(BasePostprocessor):
         self.cossim = self.args.cossim
         self.queue_len = self.args.memleng
         self.score_queue_len = 20000
+        self._score_prefixes = (
+            prefix_activation_aware_score
+            if self.args.get("prefix_score", False)
+            else activation_aware_score
+        )
+        self.legacy_top_class_score = (
+            self.args.get("top_class_score", False)
+            and "id_evidence_topk" not in self.args
+        )
+        self.id_evidence_topk = self.args.get("id_evidence_topk")
+        self.id_evidence_mode = self.args.get("id_evidence_mode", "joint")
+        if self.id_evidence_topk is not None and (
+            type(self.id_evidence_topk) is not int or self.id_evidence_topk < 1
+        ):
+            raise ValueError("id_evidence_topk must be a positive integer or null")
+        if self.id_evidence_mode not in ("joint", "compete"):
+            raise ValueError("id_evidence_mode must be joint or compete")
         self.mute_mutual_enhancement = False
+
+    def _final_confidence(self, output: torch.Tensor, class_num: int) -> torch.Tensor:
+        k = self.id_evidence_topk
+        if k is not None and k < class_num and self.id_evidence_mode == "compete":
+            return competing_id_score(output, class_num, k, self.beta, self.gamma)
+        original = self._score_prefixes(output, class_num, self.beta, self.gamma)
+        if self.legacy_top_class_score:
+            return original.float() * topk_id_mass(output[:, :class_num].float(), 1)
+        if k is None or k >= class_num:
+            return original
+        return original * topk_id_mass(output[:, :class_num], k)
 
     ###### 统计每个类sample score (MCM and Neglabel) 的均值和方差。使用GT 的label 还是predict label 呢？
     ## 也需要统计OOD sample 的分类别的均值和方差 (这里只能用predict label了)。
@@ -458,6 +522,31 @@ class ActivatedNegPostprocessor(BasePostprocessor):
     def reset_memory(self) -> None:
         self.reset = True
 
+    def _admission_masks(
+        self, scores: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        self.scoretensor = torch.cat((self.scoretensor, scores))[-self.score_queue_len :]
+        self.thres = find_best_threshold(self.scoretensor)
+        return (
+            scores > self.thres + self.gap * (1 - self.thres),
+            scores < self.thres - self.gap * self.thres,
+        )
+
+    def _rank_batch_negatives(
+        self, scores: torch.Tensor, activations: torch.Tensor, count: int
+    ) -> torch.Tensor:
+        return scores.sort(descending=True).indices[:count]
+
+    def _score_with_visual_cache(
+        self,
+        confidence: torch.Tensor,
+        images: torch.Tensor,
+        scale: torch.Tensor,
+        new_positives: int,
+        new_negatives: int,
+    ) -> torch.Tensor:
+        return confidence
+
     @torch.no_grad()
     def postprocess(
         self, net: nn.Module, data: torch.Tensor
@@ -562,7 +651,7 @@ class ActivatedNegPostprocessor(BasePostprocessor):
                     @ selected_text_features
                 )
             ######################################################### 这里用 NegLabel score 来做threshold, 改成 activation-aware 的做法。
-            conf_in_id = activation_aware_score(
+            conf_in_id = self._score_prefixes(
                 output, class_num, self.beta, step=self.gamma
             )
 
@@ -580,7 +669,7 @@ class ActivatedNegPostprocessor(BasePostprocessor):
                 )
             # full_sim = output.softmax(dim=-1)
             # conf_in_ood = full_sim[:, :class_num].sum(dim=-1)
-            conf_in_ood = activation_aware_score(
+            conf_in_ood = self._score_prefixes(
                 output, class_num, self.beta, step=self.gamma
             )
 
@@ -675,32 +764,16 @@ class ActivatedNegPostprocessor(BasePostprocessor):
         # t2t = self.online_text_features_all.t() @ self.online_text_features_all  ## most 0.7+
         # i2t = image_features @ self.online_text_features_all ## most 0.1-0.3+
         output = output.float()
-        conf_in_domain = activation_aware_score(
+        conf_in_domain = self._score_prefixes(
             output, class_num, self.beta, step=self.gamma
         )
 
         # full_sim = output.softmax(dim=-1)
         # conf_in_domain = full_sim[:, :class_num].sum(dim=-1)  ######## 这里得 score conf 也考虑换成confidence aware 的。
 
-        self.scoretensor = torch.cat(
-            (self.scoretensor, conf_in_domain), dim=0
-        )  ## 这里也要做成queue 的形式。否则会太长了。
-        if self.scoretensor.size(0) > self.score_queue_len:
-            self.scoretensor = self.scoretensor[-self.score_queue_len :]
-
-        # print('use manual threshold', self.thres)
-        best_threshold = find_best_threshold(self.scoretensor)
-        self.thres = best_threshold
-
-        # print(" best_threshold", best_threshold)  ### 为啥是 0.6 左右？ 很奇怪，是否可能是因为
-
-        # pdb.set_trace()
-        activate_indicator_id = conf_in_domain > (
-            self.thres + self.gap * (1 - self.thres)
-        )  ## select high confident samples； 这里用的还是original neglabel score.
-        activate_indicator_ood = conf_in_domain < (
-            self.thres - self.gap * self.thres
-        )  ## only select high confident samples
+        activate_indicator_id, activate_indicator_ood = self._admission_masks(
+            conf_in_domain
+        )
         to_cache_pos_features = image_features[activate_indicator_id]
         to_cache_neg_features = image_features[activate_indicator_ood]
         used_cluster_num = 0
@@ -777,18 +850,15 @@ class ActivatedNegPostprocessor(BasePostprocessor):
         combined_score = ins_adaptive_neg_score - ins_adaptive_pos_score  ## 69554.
         # combined_score =  ins_adaptive_neg_score  ## 这里只用了neg score, positive score 最好也可以用上; 但是positive 用上会导致不能用比例来卡。
 
+        indices = self._rank_batch_negatives(
+            combined_score, actscore[:, class_num:], self.beta - used_cluster_num
+        )
         if used_cluster_num > 0:
             selected_text_features = torch.cat(
                 [
                     net.text_features[:, :class_num],
                     reconst_clusters.t(),
-                    self.online_text_features_all[:, class_num:]
-                    .t()[
-                        combined_score.sort(descending=True)[1][
-                            : self.beta - used_cluster_num
-                        ]
-                    ]
-                    .t(),
+                    self.online_text_features_all[:, class_num:].t()[indices].t(),
                 ],
                 dim=-1,
             )
@@ -796,9 +866,7 @@ class ActivatedNegPostprocessor(BasePostprocessor):
             selected_text_features = torch.cat(
                 [
                     net.text_features[:, :class_num],
-                    self.online_text_features_all[:, class_num:]
-                    .t()[combined_score.sort(descending=True)[1][: self.beta]]
-                    .t(),
+                    self.online_text_features_all[:, class_num:].t()[indices].t(),
                 ],
                 dim=-1,
             )  ## 512*2000
@@ -833,7 +901,14 @@ class ActivatedNegPostprocessor(BasePostprocessor):
         # print('actscore_neg_cached:', actscore_neg_cached)
 
         ######## 既然不能加权，那就试试根据activation score online 决定 ood number. 可能也不太行，因为最开始的时候，第一个epoch 的时候，用了多少就要定下来。
-        conf_in = activation_aware_score(output, class_num, self.beta, step=self.gamma)
+        conf_in = self._final_confidence(output, class_num)
+        conf_in = self._score_with_visual_cache(
+            conf_in,
+            image_features,
+            logit_scale,
+            len(to_cache_pos_features),
+            len(to_cache_neg_features),
+        )
         # conf_in = activation_aware_score(output, class_num, self.beta, step=self.gamma, weight_by_activation_score=weight_by_activation_score)
         if torch.any(activate_indicator_id):
             self.score_from_pos = update_queue(

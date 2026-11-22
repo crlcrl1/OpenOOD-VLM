@@ -1,0 +1,4 @@
+# Overlay on quantile.yml to also score against the two past real-image queues.
+postprocessor:
+  postprocessor_args:
+    visual_cache: true

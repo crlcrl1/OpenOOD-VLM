@@ -1,0 +1,4 @@
+# Apply after quantile.yml and positive.yml for the reported configuration.
+postprocessor:
+  postprocessor_args:
+    top_class_score: true

@@ -1,0 +1,9 @@
+# Lowest CIFAR-10 FPR95 among the evaluated configurations.
+network:
+  backbone:
+    text_prompt: nice_vanilla
+    image_view: mean
+postprocessor:
+  postprocessor_args:
+    id_evidence_topk: 1
+    id_evidence_mode: joint

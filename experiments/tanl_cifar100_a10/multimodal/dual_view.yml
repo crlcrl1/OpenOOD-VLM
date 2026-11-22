@@ -1,0 +1,4 @@
+# Overlay on the uniform-template positive-queue baseline.
+network:
+  backbone:
+    image_view: mean

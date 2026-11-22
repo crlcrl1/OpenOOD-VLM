@@ -1,0 +1,51 @@
+% !TeX program = xelatex
+\documentclass[aspectratio=169,11pt,usepdftitle=false]{beamer}
+\usepackage[fontset=fandol]{ctex}
+\usepackage{amsmath,amssymb,array,booktabs,graphicx,tikz}
+\usepackage{PekingU}
+\usepackage{ocgx2}
+\usetikzlibrary{arrows.meta}
+\graphicspath{{figures/}}
+
+% 顶部导航显示当前部分的章节，页码贯穿整场汇报。
+\AtBeginSection[]{}
+\setbeamersize{text margin left=7.5mm,text margin right=7.5mm}
+\setbeameroption{hide notes}
+\setbeamerfont{subtitle}{size=\small}
+\setbeamerfont{institute}{size=\small}
+\setbeamertemplate{note page}[plain]
+\definecolor{ink}{HTML}{252327}
+\definecolor{muted}{HTML}{544F53}
+\setbeamercolor{normal text}{fg=ink,bg=white}
+\setbeamercolor{alerted text}{fg=peaking}
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.18}
+\DeclareMathOperator{\Act}{Act}
+\newcommand{\Saa}{S_{\mathrm{aa}}}
+\newcommand{\Snl}{S_{\mathrm{nl}}}
+\newcommand{\pos}{\mathrm{pos}}
+\newcommand{\negq}{\mathrm{neg}}
+\newcommand{\accenttext}[1]{{\color{peaking}\bfseries #1}}
+\newcommand{\lead}[1]{\par{\large\bfseries\color{peaking}#1\par}}
+\newcommand{\paperref}[2]{\href{https://arxiv.org/pdf/2603.25250v1\#page=#1}{#2}}
+\newcommand{\talkfooter}{TANL\quad 第一部分　原论文}
+\newcommand{\datafile}[1]{\texttt{\detokenize{#1}}}
+\title[\talkfooter]{用测试时激活的负标签（TANL）检测分布外图像}
+\subtitle{Activation Matters: Test-time Activated Negative Labels\\
+  for OOD Detection with Vision-Language Models}
+\author[视觉与语言]{视觉与语言课程汇报\qquad
+  \hyperlink{paper-start}{原论文（8 分钟）}\quad · \quad
+  \hyperlink{group-start}{小组实验（11 分钟）}}
+\institute{论文作者\quad Yabin Zhang 等\qquad
+  \href{https://arxiv.org/abs/2603.25250v1}{arXiv:2603.25250v1（2026）}}
+\date{}
+\hypersetup{pdftitle={TANL｜原论文与小组改进实验（20 分钟）},
+  pdfauthor={视觉与语言课程汇报},pdfsubject={Activation Matters, arXiv:2603.25250v1},
+  pdfdisplaydoctitle=true,colorlinks=false,pdfborder={0 0 0}}
+\begin{document}
+\part{第一部分　原论文（0 至 8 分钟）}
+\input{paper.tex}
+\part{第二部分　小组实验（8 至 19 分钟）}
+\renewcommand{\talkfooter}{TANL\quad 第二部分　小组改进}
+\input{group.tex}
+\end{document}

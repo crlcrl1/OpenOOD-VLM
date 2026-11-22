@@ -3,6 +3,7 @@ from torch import nn
 from openood.utils import Config
 
 from .activated_neg_postprocessor import ActivatedNegPostprocessor
+from .adaptive_tanl_postprocessor import AdaptiveTANLPostprocessor
 from .ash_postprocessor import ASHPostprocessor
 from .base_postprocessor import BasePostprocessor
 from .cider_postprocessor import CIDERPostprocessor
@@ -123,6 +124,7 @@ def get_postprocessor(config: Config) -> RegisteredPostprocessor:
         "ttapromptlocalfeat": TTAPromptLocalfeatPostprocessor,
         "labelrelationship": LabelRelationPostprocessor,
         "actneg": ActivatedNegPostprocessor,
+        "adaptive_tanl": AdaptiveTANLPostprocessor,
     }
 
     return postprocessors[config.postprocessor.name](config)

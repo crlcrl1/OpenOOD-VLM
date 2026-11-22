@@ -1,0 +1,9 @@
+# Overlay on improvements/quantile.yml and improvements/positive.yml.
+network:
+  backbone:
+    text_prompt: nice_vanilla
+    image_view: mean
+postprocessor:
+  postprocessor_args:
+    id_evidence_topk: 3
+    id_evidence_mode: compete

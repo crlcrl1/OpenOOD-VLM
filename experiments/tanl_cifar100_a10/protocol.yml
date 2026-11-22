@@ -1,0 +1,37 @@
+dataset:
+  num_classes: 1100
+  split_names: [test]
+ood_dataset:
+  num_classes: 1100
+  split_names: [nearood]
+  nearood:
+    datasets: [cifar10]
+network:
+  name: fixedclip_negoodprompt
+  pretrained: false
+  backbone:
+    name: ViT-B/16
+    ood_number: 1000
+    text_prompt: nice
+    text_center: true
+    corpus: neglabel_wordnet
+evaluator:
+  name: ood_clip_tta
+  ood_scheme: ood
+postprocessor:
+  name: actneg
+  APS_mode: false
+  postprocessor_args:
+    alpha: 0.95
+    beta: 1000
+    gamma: 1
+    gap: 0.2
+    thres: 0.5
+    memleng: 300
+    group_num: 5
+    random_permute: false
+    cluster_num: 0
+    cossim: false
+num_workers: 4
+recorder:
+  save_csv: false

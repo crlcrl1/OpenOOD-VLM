@@ -1,0 +1,9 @@
+network:
+  backbone:
+    uniform_negative_prompt: true
+postprocessor:
+  name: adaptive_tanl
+  postprocessor_args:
+    admission_window: 1000
+    admission_tail: 0.20
+    diversity_correlation: null
